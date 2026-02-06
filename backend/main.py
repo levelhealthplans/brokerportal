@@ -47,6 +47,12 @@ SESSION_COOKIE_SAMESITE = os.getenv("SESSION_COOKIE_SAMESITE", "lax").strip().lo
 if SESSION_COOKIE_SAMESITE not in {"lax", "strict", "none"}:
     SESSION_COOKIE_SAMESITE = "lax"
 
+DEFAULT_ADMIN_EMAIL = os.getenv("DEFAULT_ADMIN_EMAIL", "jake@levelhealthplans.com").strip().lower()
+DEFAULT_ADMIN_FIRST_NAME = os.getenv("DEFAULT_ADMIN_FIRST_NAME", "Jake").strip()
+DEFAULT_ADMIN_LAST_NAME = os.getenv("DEFAULT_ADMIN_LAST_NAME", "Page").strip()
+DEFAULT_ADMIN_ORGANIZATION = os.getenv("DEFAULT_ADMIN_ORGANIZATION", "Level Health").strip()
+DEFAULT_ADMIN_TITLE = os.getenv("DEFAULT_ADMIN_TITLE", "Admin").strip()
+
 UPLOADS_DIR.mkdir(parents=True, exist_ok=True)
 
 SESSION_COOKIE_NAME = "lh_session"
@@ -432,6 +438,39 @@ def init_db() -> None:
         cur.execute("SELECT COUNT(*) as cnt FROM Organization")
         if cur.fetchone()["cnt"] == 0:
             seed_organizations(conn)
+        ensure_default_admin_user(conn)
+
+
+def ensure_default_admin_user(conn: sqlite3.Connection) -> None:
+    email = DEFAULT_ADMIN_EMAIL
+    if not email:
+        return
+    now = now_iso()
+    cur = conn.cursor()
+    cur.execute("SELECT id FROM User WHERE email = ?", (email,))
+    existing = cur.fetchone()
+    if existing:
+        return
+    cur.execute(
+        """
+        INSERT INTO User (
+            id, first_name, last_name, email, phone, job_title, organization, role, created_at, updated_at
+        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+        """,
+        (
+            str(uuid.uuid4()),
+            DEFAULT_ADMIN_FIRST_NAME,
+            DEFAULT_ADMIN_LAST_NAME,
+            email,
+            "",
+            DEFAULT_ADMIN_TITLE,
+            DEFAULT_ADMIN_ORGANIZATION,
+            "admin",
+            now,
+            now,
+        ),
+    )
+    conn.commit()
 
 
 # ----------------------
