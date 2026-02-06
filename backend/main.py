@@ -46,6 +46,12 @@ SESSION_COOKIE_SECURE = os.getenv("SESSION_COOKIE_SECURE", "false").strip().lowe
 SESSION_COOKIE_SAMESITE = os.getenv("SESSION_COOKIE_SAMESITE", "lax").strip().lower()
 if SESSION_COOKIE_SAMESITE not in {"lax", "strict", "none"}:
     SESSION_COOKIE_SAMESITE = "lax"
+ALLOW_QUERY_AUTH_FALLBACK = os.getenv("ALLOW_QUERY_AUTH_FALLBACK", "false").strip().lower() in {
+    "1",
+    "true",
+    "yes",
+    "on",
+}
 
 DEFAULT_ADMIN_EMAIL = os.getenv("DEFAULT_ADMIN_EMAIL", "jake@levelhealthplans.com").strip().lower()
 DEFAULT_ADMIN_FIRST_NAME = os.getenv("DEFAULT_ADMIN_FIRST_NAME", "Jake").strip()
@@ -1150,6 +1156,30 @@ def require_session_user(conn: sqlite3.Connection, request: Request) -> sqlite3.
     return user
 
 
+def require_session_role(
+    conn: sqlite3.Connection, request: Request, allowed_roles: set[str]
+) -> sqlite3.Row:
+    user = require_session_user(conn, request)
+    if (user["role"] or "").strip().lower() not in allowed_roles:
+        raise HTTPException(status_code=403, detail="Insufficient permissions")
+    return user
+
+
+def resolve_access_scope(
+    conn: sqlite3.Connection,
+    request: Request,
+    role: Optional[str],
+    email: Optional[str],
+) -> tuple[Optional[str], Optional[str]]:
+    # Prefer authenticated session identity over client-supplied query params.
+    session_user = get_session_user(conn, request)
+    if session_user:
+        return session_user["role"], session_user["email"]
+    if ALLOW_QUERY_AUTH_FALLBACK:
+        return role, email
+    raise HTTPException(status_code=401, detail="Authentication required")
+
+
 def latest_census_upload(conn: sqlite3.Connection, quote_id: str) -> Optional[sqlite3.Row]:
     cur = conn.cursor()
     cur.execute(
@@ -1571,7 +1601,9 @@ def get_network_options() -> List[str]:
 
 
 @app.post("/api/network-options", response_model=List[str])
-def create_network_option(payload: NetworkOptionIn) -> List[str]:
+def create_network_option(payload: NetworkOptionIn, request: Request) -> List[str]:
+    with get_db() as conn:
+        require_session_role(conn, request, {"admin"})
     name = payload.name.strip()
     if not name:
         raise HTTPException(status_code=400, detail="Network option name is required")
@@ -1582,7 +1614,9 @@ def create_network_option(payload: NetworkOptionIn) -> List[str]:
 
 
 @app.patch("/api/network-options/{current_name}", response_model=List[str])
-def update_network_option(current_name: str, payload: NetworkOptionIn) -> List[str]:
+def update_network_option(current_name: str, payload: NetworkOptionIn, request: Request) -> List[str]:
+    with get_db() as conn:
+        require_session_role(conn, request, {"admin"})
     next_name = payload.name.strip()
     if not next_name:
         raise HTTPException(status_code=400, detail="Network option name is required")
@@ -1615,7 +1649,9 @@ def update_network_option(current_name: str, payload: NetworkOptionIn) -> List[s
 
 
 @app.delete("/api/network-options/{name}", response_model=List[str])
-def delete_network_option(name: str) -> List[str]:
+def delete_network_option(name: str, request: Request) -> List[str]:
+    with get_db() as conn:
+        require_session_role(conn, request, {"admin"})
     if name in {"Cigna_PPO"}:
         raise HTTPException(status_code=400, detail="Default network cannot be deleted")
     settings = read_network_settings()
@@ -1636,7 +1672,9 @@ def get_network_mappings() -> List[NetworkMappingOut]:
 
 
 @app.post("/api/network-mappings", response_model=List[NetworkMappingOut])
-def create_network_mapping(payload: NetworkMappingIn) -> List[NetworkMappingOut]:
+def create_network_mapping(payload: NetworkMappingIn, request: Request) -> List[NetworkMappingOut]:
+    with get_db() as conn:
+        require_session_role(conn, request, {"admin"})
     zip_value = normalize_zip(payload.zip)
     network = payload.network.strip()
     if not zip_value:
@@ -1651,7 +1689,9 @@ def create_network_mapping(payload: NetworkMappingIn) -> List[NetworkMappingOut]
 
 
 @app.patch("/api/network-mappings/{zip_code}", response_model=List[NetworkMappingOut])
-def update_network_mapping(zip_code: str, payload: NetworkMappingIn) -> List[NetworkMappingOut]:
+def update_network_mapping(zip_code: str, payload: NetworkMappingIn, request: Request) -> List[NetworkMappingOut]:
+    with get_db() as conn:
+        require_session_role(conn, request, {"admin"})
     source_zip = normalize_zip(zip_code)
     target_zip = normalize_zip(payload.zip)
     network = payload.network.strip()
@@ -1669,7 +1709,9 @@ def update_network_mapping(zip_code: str, payload: NetworkMappingIn) -> List[Net
 
 
 @app.delete("/api/network-mappings/{zip_code}", response_model=List[NetworkMappingOut])
-def delete_network_mapping(zip_code: str) -> List[NetworkMappingOut]:
+def delete_network_mapping(zip_code: str, request: Request) -> List[NetworkMappingOut]:
+    with get_db() as conn:
+        require_session_role(conn, request, {"admin"})
     source_zip = normalize_zip(zip_code)
     if not source_zip:
         raise HTTPException(status_code=400, detail="ZIP must be a valid 5-digit value")
@@ -1686,7 +1728,9 @@ def get_network_settings() -> NetworkSettingsOut:
 
 
 @app.put("/api/network-settings", response_model=NetworkSettingsOut)
-def update_network_settings(payload: NetworkSettingsOut) -> NetworkSettingsOut:
+def update_network_settings(payload: NetworkSettingsOut, request: Request) -> NetworkSettingsOut:
+    with get_db() as conn:
+        require_session_role(conn, request, {"admin"})
     default_network = payload.default_network.strip()
     if not default_network:
         raise HTTPException(status_code=400, detail="Default network is required")
@@ -1695,10 +1739,13 @@ def update_network_settings(payload: NetworkSettingsOut) -> NetworkSettingsOut:
 
 
 @app.get("/api/quotes", response_model=List[QuoteListOut])
-def list_quotes(role: Optional[str] = None, email: Optional[str] = None) -> List[QuoteListOut]:
+def list_quotes(
+    request: Request, role: Optional[str] = None, email: Optional[str] = None
+) -> List[QuoteListOut]:
     with get_db() as conn:
         cur = conn.cursor()
-        where_clause, params = build_access_filter(conn, role, email)
+        scoped_role, scoped_email = resolve_access_scope(conn, request, role, email)
+        where_clause, params = build_access_filter(conn, scoped_role, scoped_email)
         cur.execute(f"SELECT * FROM Quote {where_clause} ORDER BY created_at DESC", params)
         rows = cur.fetchall()
         quotes: List[QuoteListOut] = []
@@ -1806,8 +1853,24 @@ def create_quote(payload: QuoteCreate) -> QuoteOut:
 
 
 @app.get("/api/quotes/{quote_id}")
-def get_quote_detail(quote_id: str) -> Dict[str, Any]:
+def get_quote_detail(
+    quote_id: str, request: Request, role: Optional[str] = None, email: Optional[str] = None
+) -> Dict[str, Any]:
     with get_db() as conn:
+        scoped_role, scoped_email = resolve_access_scope(conn, request, role, email)
+        if scoped_role != "admin":
+            where_clause, params = build_access_filter(conn, scoped_role, scoped_email)
+            if where_clause:
+                cur = conn.cursor()
+                cur.execute(
+                    f"SELECT id FROM Quote {where_clause} AND id = ? LIMIT 1",
+                    [*params, quote_id],
+                )
+                scoped = cur.fetchone()
+                if not scoped:
+                    raise HTTPException(status_code=404, detail="Quote not found")
+            else:
+                raise HTTPException(status_code=404, detail="Quote not found")
         quote = fetch_quote(conn, quote_id)
         cur = conn.cursor()
         cur.execute("SELECT * FROM Upload WHERE quote_id = ? ORDER BY created_at DESC", (quote_id,))
@@ -1867,8 +1930,9 @@ def get_quote_detail(quote_id: str) -> Dict[str, Any]:
 
 
 @app.get("/api/organizations", response_model=List[OrganizationOut])
-def list_organizations(org_type: Optional[str] = None) -> List[OrganizationOut]:
+def list_organizations(request: Request, org_type: Optional[str] = None) -> List[OrganizationOut]:
     with get_db() as conn:
+        require_session_role(conn, request, {"admin"})
         cur = conn.cursor()
         if org_type:
             cur.execute(
@@ -1882,8 +1946,9 @@ def list_organizations(org_type: Optional[str] = None) -> List[OrganizationOut]:
 
 
 @app.get("/api/organizations/{org_id}", response_model=OrganizationOut)
-def get_organization(org_id: str) -> OrganizationOut:
+def get_organization(org_id: str, request: Request) -> OrganizationOut:
     with get_db() as conn:
+        require_session_role(conn, request, {"admin"})
         cur = conn.cursor()
         cur.execute("SELECT * FROM Organization WHERE id = ?", (org_id,))
         row = cur.fetchone()
@@ -1893,10 +1958,11 @@ def get_organization(org_id: str) -> OrganizationOut:
 
 
 @app.post("/api/organizations", response_model=OrganizationOut)
-def create_organization(payload: OrganizationIn) -> OrganizationOut:
+def create_organization(payload: OrganizationIn, request: Request) -> OrganizationOut:
     org_id = str(uuid.uuid4())
     created_at = now_iso()
     with get_db() as conn:
+        require_session_role(conn, request, {"admin"})
         cur = conn.cursor()
         cur.execute(
             """
@@ -1961,8 +2027,9 @@ def create_organization(payload: OrganizationIn) -> OrganizationOut:
 
 
 @app.patch("/api/organizations/{org_id}", response_model=OrganizationOut)
-def update_organization(org_id: str, payload: OrganizationUpdate) -> OrganizationOut:
+def update_organization(org_id: str, payload: OrganizationUpdate, request: Request) -> OrganizationOut:
     with get_db() as conn:
+        require_session_role(conn, request, {"admin"})
         cur = conn.cursor()
         cur.execute("SELECT * FROM Organization WHERE id = ?", (org_id,))
         org = cur.fetchone()
@@ -2031,8 +2098,9 @@ def update_organization(org_id: str, payload: OrganizationUpdate) -> Organizatio
 
 
 @app.delete("/api/organizations/{org_id}")
-def delete_organization(org_id: str) -> Dict[str, str]:
+def delete_organization(org_id: str, request: Request) -> Dict[str, str]:
     with get_db() as conn:
+        require_session_role(conn, request, {"admin"})
         cur = conn.cursor()
         cur.execute("SELECT * FROM Organization WHERE id = ?", (org_id,))
         org = cur.fetchone()
@@ -2062,11 +2130,12 @@ def delete_organization(org_id: str) -> Dict[str, str]:
 
 
 @app.post("/api/organizations/{org_id}/assign-quotes")
-def assign_quotes_to_org(org_id: str, payload: OrganizationAssignIn) -> Dict[str, str]:
+def assign_quotes_to_org(org_id: str, payload: OrganizationAssignIn, request: Request) -> Dict[str, str]:
     quote_ids = payload.quote_ids or []
     if not quote_ids:
         return {"status": "no-op"}
     with get_db() as conn:
+        require_session_role(conn, request, {"admin"})
         cur = conn.cursor()
         cur.execute("SELECT * FROM Organization WHERE id = ?", (org_id,))
         org = cur.fetchone()
@@ -2112,8 +2181,9 @@ def assign_quotes_to_org(org_id: str, payload: OrganizationAssignIn) -> Dict[str
 
 
 @app.get("/api/users", response_model=List[UserOut])
-def list_users() -> List[UserOut]:
+def list_users(request: Request) -> List[UserOut]:
     with get_db() as conn:
+        require_session_role(conn, request, {"admin"})
         cur = conn.cursor()
         cur.execute("SELECT * FROM User ORDER BY last_name ASC, first_name ASC")
         rows = cur.fetchall()
@@ -2121,10 +2191,11 @@ def list_users() -> List[UserOut]:
 
 
 @app.post("/api/users", response_model=UserOut)
-def create_user(payload: UserIn) -> UserOut:
+def create_user(payload: UserIn, request: Request) -> UserOut:
     user_id = str(uuid.uuid4())
     now = now_iso()
     with get_db() as conn:
+        require_session_role(conn, request, {"admin"})
         cur = conn.cursor()
         cur.execute(
             """
@@ -2152,8 +2223,9 @@ def create_user(payload: UserIn) -> UserOut:
 
 
 @app.patch("/api/users/{user_id}", response_model=UserOut)
-def update_user(user_id: str, payload: UserUpdate) -> UserOut:
+def update_user(user_id: str, payload: UserUpdate, request: Request) -> UserOut:
     with get_db() as conn:
+        require_session_role(conn, request, {"admin"})
         user = fetch_user(conn, user_id)
         updates = payload.dict(exclude_unset=True)
         data = dict(user)
@@ -2190,8 +2262,9 @@ def update_user(user_id: str, payload: UserUpdate) -> UserOut:
 
 
 @app.delete("/api/users/{user_id}")
-def delete_user(user_id: str) -> Dict[str, str]:
+def delete_user(user_id: str, request: Request) -> Dict[str, str]:
     with get_db() as conn:
+        require_session_role(conn, request, {"admin"})
         fetch_user(conn, user_id)
         cur = conn.cursor()
         cur.execute("UPDATE Quote SET assigned_user_id = NULL WHERE assigned_user_id = ?", (user_id,))
@@ -2202,9 +2275,10 @@ def delete_user(user_id: str) -> Dict[str, str]:
 
 
 @app.post("/api/users/{user_id}/assign-quotes")
-def assign_quotes_to_user(user_id: str, payload: UserAssignIn) -> Dict[str, str]:
+def assign_quotes_to_user(user_id: str, payload: UserAssignIn, request: Request) -> Dict[str, str]:
     quote_ids = payload.quote_ids or []
     with get_db() as conn:
+        require_session_role(conn, request, {"admin"})
         fetch_user(conn, user_id)
         cur = conn.cursor()
         cur.execute("UPDATE Quote SET assigned_user_id = NULL WHERE assigned_user_id = ?", (user_id,))
@@ -2219,9 +2293,10 @@ def assign_quotes_to_user(user_id: str, payload: UserAssignIn) -> Dict[str, str]
 
 
 @app.post("/api/users/{user_id}/assign-tasks")
-def assign_tasks_to_user(user_id: str, payload: UserAssignIn) -> Dict[str, str]:
+def assign_tasks_to_user(user_id: str, payload: UserAssignIn, request: Request) -> Dict[str, str]:
     task_ids = payload.task_ids or []
     with get_db() as conn:
+        require_session_role(conn, request, {"admin"})
         fetch_user(conn, user_id)
         cur = conn.cursor()
         cur.execute("UPDATE Task SET assigned_user_id = NULL WHERE assigned_user_id = ?", (user_id,))
@@ -2236,8 +2311,9 @@ def assign_tasks_to_user(user_id: str, payload: UserAssignIn) -> Dict[str, str]:
 
 
 @app.get("/api/organizations/{org_id}/users", response_model=List[UserOut])
-def list_organization_users(org_id: str) -> List[UserOut]:
+def list_organization_users(org_id: str, request: Request) -> List[UserOut]:
     with get_db() as conn:
+        require_session_role(conn, request, {"admin"})
         cur = conn.cursor()
         cur.execute("SELECT * FROM Organization WHERE id = ?", (org_id,))
         org = cur.fetchone()
@@ -2259,10 +2335,11 @@ def list_organization_users(org_id: str) -> List[UserOut]:
 
 
 @app.get("/api/tasks", response_model=List[TaskListOut])
-def list_tasks(role: Optional[str] = None, email: Optional[str] = None) -> List[TaskListOut]:
+def list_tasks(request: Request, role: Optional[str] = None, email: Optional[str] = None) -> List[TaskListOut]:
     with get_db() as conn:
         cur = conn.cursor()
-        where_clause, params = build_access_filter(conn, role, email)
+        scoped_role, scoped_email = resolve_access_scope(conn, request, role, email)
+        where_clause, params = build_access_filter(conn, scoped_role, scoped_email)
         cur.execute(
             f"""
             SELECT
@@ -2892,9 +2969,11 @@ def mark_proposal_signed(quote_id: str) -> Dict[str, str]:
 
 @app.post("/api/quotes/{quote_id}/convert-to-installation", response_model=InstallationOut)
 def convert_to_installation(
-    quote_id: str, role: Optional[str] = None, email: Optional[str] = None
+    quote_id: str, request: Request, role: Optional[str] = None, email: Optional[str] = None
 ) -> InstallationOut:
-    if role == "sponsor":
+    with get_db() as conn:
+        scoped_role, _ = resolve_access_scope(conn, request, role, email)
+    if scoped_role == "sponsor":
         raise HTTPException(status_code=403, detail="Only broker/admin can mark sold")
     with get_db() as conn:
         quote = fetch_quote(conn, quote_id)
@@ -2948,10 +3027,13 @@ def convert_to_installation(
 
 
 @app.get("/api/installations", response_model=List[InstallationOut])
-def list_installations(role: Optional[str] = None, email: Optional[str] = None) -> List[InstallationOut]:
+def list_installations(
+    request: Request, role: Optional[str] = None, email: Optional[str] = None
+) -> List[InstallationOut]:
     with get_db() as conn:
         cur = conn.cursor()
-        where_clause, params = build_access_filter(conn, role, email)
+        scoped_role, scoped_email = resolve_access_scope(conn, request, role, email)
+        where_clause, params = build_access_filter(conn, scoped_role, scoped_email)
         cur.execute(
             f"SELECT * FROM Installation {where_clause} ORDER BY created_at DESC",
             params,
@@ -2962,20 +3044,36 @@ def list_installations(role: Optional[str] = None, email: Optional[str] = None) 
 
 @app.get("/api/installations/{installation_id}")
 def get_installation_detail(
-    installation_id: str, role: Optional[str] = None, email: Optional[str] = None
+    installation_id: str,
+    request: Request,
+    role: Optional[str] = None,
+    email: Optional[str] = None,
 ) -> Dict[str, Any]:
     with get_db() as conn:
+        scoped_role, scoped_email = resolve_access_scope(conn, request, role, email)
         cur = conn.cursor()
         cur.execute("SELECT * FROM Installation WHERE id = ?", (installation_id,))
         installation = cur.fetchone()
         if not installation:
             raise HTTPException(status_code=404, detail="Installation not found")
+        if scoped_role != "admin":
+            where_clause, params = build_access_filter(conn, scoped_role, scoped_email)
+            if where_clause:
+                cur.execute(
+                    f"SELECT id FROM Installation {where_clause} AND id = ? LIMIT 1",
+                    [*params, installation_id],
+                )
+                scoped = cur.fetchone()
+                if not scoped:
+                    raise HTTPException(status_code=404, detail="Installation not found")
+            else:
+                raise HTTPException(status_code=404, detail="Installation not found")
         cur.execute(
             "SELECT * FROM Task WHERE installation_id = ? ORDER BY title",
             (installation_id,),
         )
         tasks = [dict(row) for row in cur.fetchall()]
-        if role == "sponsor":
+        if scoped_role == "sponsor":
             tasks = [task for task in tasks if task["title"] not in BROKER_ADMIN_ONLY_TASKS]
         cur.execute(
             "SELECT * FROM InstallationDocument WHERE installation_id = ? ORDER BY created_at DESC",
@@ -2992,11 +3090,10 @@ def get_installation_detail(
 
 @app.post("/api/installations/{installation_id}/tasks/{task_id}/advance", response_model=TaskOut)
 def advance_task(
-    installation_id: str, task_id: str, role: Optional[str] = None, email: Optional[str] = None
+    installation_id: str, task_id: str, request: Request
 ) -> TaskOut:
-    if role != "admin":
-        raise HTTPException(status_code=403, detail="Only admin can update task status")
     with get_db() as conn:
+        require_session_role(conn, request, {"admin"})
         cur = conn.cursor()
         cur.execute(
             "SELECT * FROM Task WHERE id = ? AND installation_id = ?",
@@ -3034,17 +3131,14 @@ def update_task(
     installation_id: str,
     task_id: str,
     payload: TaskUpdateIn,
-    role: Optional[str] = None,
-    email: Optional[str] = None,
+    request: Request,
 ) -> TaskOut:
-    if role != "admin":
-        raise HTTPException(status_code=403, detail="Only admin can update implementation tasks")
-
     updates = payload.dict(exclude_unset=True)
     if not updates:
         raise HTTPException(status_code=400, detail="No task updates provided")
 
     with get_db() as conn:
+        require_session_role(conn, request, {"admin"})
         cur = conn.cursor()
         cur.execute(
             "SELECT * FROM Task WHERE id = ? AND installation_id = ?",

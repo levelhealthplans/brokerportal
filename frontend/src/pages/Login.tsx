@@ -1,10 +1,9 @@
 import { useState } from "react";
 import { useAccess } from "../access";
-import { Link, useNavigate } from "react-router-dom";
+import { Link } from "react-router-dom";
 
 export default function Login() {
-  const { requestMagicLink, setUser } = useAccess();
-  const navigate = useNavigate();
+  const { requestMagicLink } = useAccess();
   const [email, setEmail] = useState("");
   const [message, setMessage] = useState<string | null>(null);
   const [devLink, setDevLink] = useState<string | null>(null);
@@ -32,18 +31,6 @@ export default function Login() {
     }
   };
 
-  const handleBypassLogin = () => {
-    const bypassEmail = (email.trim() || "jake@levelhealthplans.com").toLowerCase();
-    setUser({
-      email: bypassEmail,
-      role: "admin",
-      first_name: "Jake",
-      last_name: "Page",
-      organization: "Level Health",
-    });
-    navigate("/", { replace: true });
-  };
-
   return (
     <section className="section" style={{ maxWidth: 460, margin: "48px auto" }}>
       <h2>Log In</h2>
@@ -61,9 +48,6 @@ export default function Login() {
         <div className="inline-actions">
           <button className="button" type="submit" disabled={busy}>
             Send Magic Link
-          </button>
-          <button className="button ghost" type="button" onClick={handleBypassLogin}>
-            Continue as Admin (Bypass)
           </button>
         </div>
       </form>
