@@ -1,0 +1,23 @@
+services:
+  - type: web
+    name: level-health-backend
+    runtime: python
+    buildCommand: pip install -r backend/requirements.txt
+    startCommand: uvicorn backend.main:app --host 0.0.0.0 --port $PORT
+    envVars:
+      - key: PYTHON_VERSION
+        value: 3.12.2
+      - key: FRONTEND_BASE_URL
+        value: https://YOUR-VERCEL-DOMAIN.vercel.app
+      - key: DB_PATH
+        value: /var/data/app.db
+      - key: UPLOADS_DIR
+        value: /var/data/uploads
+      - key: SESSION_COOKIE_SECURE
+        value: "true"
+      - key: SESSION_COOKIE_SAMESITE
+        value: "lax"
+    disk:
+      name: level-health-data
+      mountPath: /var/data
+      sizeGB: 1
