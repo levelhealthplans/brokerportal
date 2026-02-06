@@ -220,6 +220,23 @@ export type NetworkSettings = {
 const API_BASE = (import.meta.env.VITE_API_BASE || "/api").replace(/\/+$/, "");
 const REQUEST_TIMEOUT_MS = 15000;
 
+function parseErrorMessage(raw: string): string {
+  const text = (raw || "").trim();
+  if (!text) return "";
+  try {
+    const parsed = JSON.parse(text) as { detail?: unknown; message?: unknown };
+    if (typeof parsed.detail === "string" && parsed.detail.trim()) {
+      return parsed.detail.trim();
+    }
+    if (typeof parsed.message === "string" && parsed.message.trim()) {
+      return parsed.message.trim();
+    }
+  } catch {
+    return text;
+  }
+  return text;
+}
+
 async function request<T>(path: string, options?: RequestInit): Promise<T> {
   const controller = new AbortController();
   const timeout = window.setTimeout(() => controller.abort(), REQUEST_TIMEOUT_MS);
@@ -239,7 +256,7 @@ async function request<T>(path: string, options?: RequestInit): Promise<T> {
     window.clearTimeout(timeout);
   }
   if (!res.ok) {
-    const message = await res.text();
+    const message = parseErrorMessage(await res.text());
     throw new Error(message || "Request failed");
   }
   try {
@@ -365,6 +382,14 @@ export function requestMagicLink(email: string) {
     method: "POST",
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify({ email }),
+  });
+}
+
+export function loginWithPassword(email: string, password: string) {
+  return request<AuthUser>("/auth/login", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ email, password }),
   });
 }
 

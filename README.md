@@ -44,7 +44,9 @@ git push
 2. Select this GitHub repo.
 3. Render will detect `render.yaml`.
 4. Before applying, set:
-   - `FRONTEND_BASE_URL` to your Vercel URL (example: `https://level-health-portal.vercel.app`)
+   - `FRONTEND_BASE_URL` to your Vercel URL (example: `https://broker-portal.vercel.app`)
+   - `ALLOWED_ORIGINS` to your Vercel URL (example: `https://broker-portal.vercel.app`)
+   - `ALLOWED_ORIGIN_REGEX` for preview deploys (example: `https://.*\\.vercel\\.app`)
 5. Deploy.
 6. After deploy, copy the backend URL (example: `https://level-health-backend.onrender.com`).
 
@@ -67,7 +69,9 @@ Commit and push that change.
 ### 5) Final env check
 
 In Render service env vars, confirm:
-- `FRONTEND_BASE_URL=https://<your-vercel-domain>`
+- `FRONTEND_BASE_URL=https://broker-portal.vercel.app`
+- `ALLOWED_ORIGINS=https://broker-portal.vercel.app`
+- `ALLOWED_ORIGIN_REGEX=https://.*\\.vercel\\.app`
 - `DB_PATH=/var/data/app.db`
 - `UPLOADS_DIR=/var/data/uploads`
 - `SESSION_COOKIE_SECURE=true`

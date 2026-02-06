@@ -8,7 +8,11 @@ services:
       - key: PYTHON_VERSION
         value: 3.12.2
       - key: FRONTEND_BASE_URL
-        value: https://YOUR-VERCEL-DOMAIN.vercel.app
+        value: https://broker-portal.vercel.app
+      - key: ALLOWED_ORIGINS
+        value: https://broker-portal.vercel.app
+      - key: ALLOWED_ORIGIN_REGEX
+        value: https://.*\\.vercel\\.app
       - key: DB_PATH
         value: /var/data/app.db
       - key: UPLOADS_DIR

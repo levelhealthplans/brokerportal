@@ -58,6 +58,8 @@ DEFAULT_ADMIN_FIRST_NAME = os.getenv("DEFAULT_ADMIN_FIRST_NAME", "Jake").strip()
 DEFAULT_ADMIN_LAST_NAME = os.getenv("DEFAULT_ADMIN_LAST_NAME", "Page").strip()
 DEFAULT_ADMIN_ORGANIZATION = os.getenv("DEFAULT_ADMIN_ORGANIZATION", "Level Health").strip()
 DEFAULT_ADMIN_TITLE = os.getenv("DEFAULT_ADMIN_TITLE", "Admin").strip()
+DEFAULT_ADMIN_PASSWORD = os.getenv("DEFAULT_ADMIN_PASSWORD", "ChangeMe123!").strip()
+DEFAULT_USER_PASSWORD = os.getenv("DEFAULT_USER_PASSWORD", "ChangeMe123!").strip()
 
 UPLOADS_DIR.mkdir(parents=True, exist_ok=True)
 
@@ -97,15 +99,31 @@ TASK_STATE_CANONICAL = {
 app = FastAPI(title="Level Health Broker Portal API")
 
 FRONTEND_BASE_URL = os.getenv("FRONTEND_BASE_URL", "http://localhost:5173").rstrip("/")
-ALLOWED_ORIGINS = [
+_extra_origins_raw = os.getenv("ALLOWED_ORIGINS", "")
+EXTRA_ALLOWED_ORIGINS = [
+    origin.strip().rstrip("/")
+    for origin in _extra_origins_raw.split(",")
+    if origin.strip()
+]
+ALLOW_ORIGIN_REGEX = os.getenv("ALLOWED_ORIGIN_REGEX", "").strip() or None
+ALLOWED_ORIGINS = sorted(set([
     FRONTEND_BASE_URL,
     "http://localhost:5173",
     "http://127.0.0.1:5173",
-]
+    *EXTRA_ALLOWED_ORIGINS,
+]))
+_allow_dev_magic_fallback_default = FRONTEND_BASE_URL.startswith("http://localhost") or FRONTEND_BASE_URL.startswith(
+    "http://127.0.0.1"
+)
+ALLOW_DEV_MAGIC_LINK_FALLBACK = os.getenv(
+    "ALLOW_DEV_MAGIC_LINK_FALLBACK",
+    "true" if _allow_dev_magic_fallback_default else "false",
+).strip().lower() in {"1", "true", "yes", "on"}
 
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=sorted(set(ALLOWED_ORIGINS)),
+    allow_origins=ALLOWED_ORIGINS,
+    allow_origin_regex=ALLOW_ORIGIN_REGEX,
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
@@ -325,6 +343,8 @@ def init_db() -> None:
                 job_title TEXT,
                 organization TEXT,
                 role TEXT,
+                password_salt TEXT,
+                password_hash TEXT,
                 created_at TEXT,
                 updated_at TEXT
             )
@@ -434,6 +454,24 @@ def init_db() -> None:
         user_cols = {row["name"] for row in cur.fetchall()}
         if "phone" not in user_cols:
             cur.execute("ALTER TABLE User ADD COLUMN phone TEXT")
+        if "password_salt" not in user_cols:
+            cur.execute("ALTER TABLE User ADD COLUMN password_salt TEXT")
+        if "password_hash" not in user_cols:
+            cur.execute("ALTER TABLE User ADD COLUMN password_hash TEXT")
+
+        cur.execute("PRAGMA table_info(AuthMagicLink)")
+        magic_cols = {row["name"] for row in cur.fetchall()}
+        if "used_at" not in magic_cols:
+            cur.execute("ALTER TABLE AuthMagicLink ADD COLUMN used_at TEXT")
+        if "created_at" not in magic_cols:
+            cur.execute("ALTER TABLE AuthMagicLink ADD COLUMN created_at TEXT")
+
+        cur.execute("PRAGMA table_info(AuthSession)")
+        session_cols = {row["name"] for row in cur.fetchall()}
+        if "created_at" not in session_cols:
+            cur.execute("ALTER TABLE AuthSession ADD COLUMN created_at TEXT")
+        if "last_seen_at" not in session_cols:
+            cur.execute("ALTER TABLE AuthSession ADD COLUMN last_seen_at TEXT")
 
         conn.commit()
 
@@ -452,16 +490,35 @@ def ensure_default_admin_user(conn: sqlite3.Connection) -> None:
     if not email:
         return
     now = now_iso()
+    password = DEFAULT_ADMIN_PASSWORD or DEFAULT_USER_PASSWORD
+    salt = None
+    password_hash = None
+    if password:
+        salt, password_hash = create_password_credentials(password)
     cur = conn.cursor()
-    cur.execute("SELECT id FROM User WHERE email = ?", (email,))
+    cur.execute("SELECT * FROM User WHERE email = ?", (email,))
     existing = cur.fetchone()
     if existing:
+        if (
+            password
+            and not (existing["password_salt"] and existing["password_hash"])
+        ):
+            cur.execute(
+                """
+                UPDATE User
+                SET password_salt = ?, password_hash = ?, updated_at = ?
+                WHERE id = ?
+                """,
+                (salt, password_hash, now, existing["id"]),
+            )
+            conn.commit()
         return
     cur.execute(
         """
         INSERT INTO User (
-            id, first_name, last_name, email, phone, job_title, organization, role, created_at, updated_at
-        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            id, first_name, last_name, email, phone, job_title, organization, role,
+            password_salt, password_hash, created_at, updated_at
+        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
         """,
         (
             str(uuid.uuid4()),
@@ -472,6 +529,8 @@ def ensure_default_admin_user(conn: sqlite3.Connection) -> None:
             DEFAULT_ADMIN_TITLE,
             DEFAULT_ADMIN_ORGANIZATION,
             "admin",
+            salt,
+            password_hash,
             now,
             now,
         ),
@@ -988,6 +1047,7 @@ class UserIn(BaseModel):
     job_title: str
     organization: str
     role: str
+    password: Optional[str] = None
 
 
 class UserOut(BaseModel):
@@ -1011,6 +1071,7 @@ class UserUpdate(BaseModel):
     job_title: Optional[str] = None
     organization: Optional[str] = None
     role: Optional[str] = None
+    password: Optional[str] = None
 
 
 class UserAssignIn(BaseModel):
@@ -1020,6 +1081,11 @@ class UserAssignIn(BaseModel):
 
 class AuthRequestIn(BaseModel):
     email: str
+
+
+class AuthLoginIn(BaseModel):
+    email: str
+    password: str
 
 
 class AuthVerifyOut(BaseModel):
@@ -1070,6 +1136,27 @@ def auth_user_payload(row: sqlite3.Row) -> AuthVerifyOut:
 
 def sha256_hex(value: str) -> str:
     return hashlib.sha256(value.encode("utf-8")).hexdigest()
+
+
+def hash_password(password: str, salt: str) -> str:
+    return hashlib.pbkdf2_hmac(
+        "sha256",
+        password.encode("utf-8"),
+        salt.encode("utf-8"),
+        120000,
+    ).hex()
+
+
+def create_password_credentials(password: str) -> tuple[str, str]:
+    salt = secrets.token_hex(16)
+    return salt, hash_password(password, salt)
+
+
+def verify_password(password: str, salt: Optional[str], expected_hash: Optional[str]) -> bool:
+    if not password or not salt or not expected_hash:
+        return False
+    actual_hash = hash_password(password, salt)
+    return secrets.compare_digest(actual_hash, expected_hash)
 
 
 def send_resend_magic_link(to_email: str, link: str) -> bool:
@@ -1529,11 +1616,51 @@ def request_magic_link(payload: AuthRequestIn) -> Dict[str, str]:
         conn.commit()
 
     link = f"{FRONTEND_BASE_URL}/auth/verify?token={token}"
-    sent = send_resend_magic_link(email, link)
+    try:
+        sent = send_resend_magic_link(email, link)
+    except HTTPException:
+        if ALLOW_DEV_MAGIC_LINK_FALLBACK:
+            return {"status": "dev_link", "link": link}
+        raise
+
     if sent:
         return {"status": "sent"}
+
     # Local dev fallback when Resend keys are not configured.
-    return {"status": "dev_link", "link": link}
+    if ALLOW_DEV_MAGIC_LINK_FALLBACK:
+        return {"status": "dev_link", "link": link}
+    raise HTTPException(status_code=502, detail="Magic link email delivery is not configured.")
+
+
+@app.post("/api/auth/login", response_model=AuthVerifyOut)
+def login_with_password(payload: AuthLoginIn, response: Response) -> AuthVerifyOut:
+    email = payload.email.strip().lower()
+    password = payload.password
+    if not email or not password:
+        raise HTTPException(status_code=400, detail="Email and password are required")
+
+    with get_db() as conn:
+        cur = conn.cursor()
+        cur.execute("SELECT * FROM User WHERE email = ?", (email,))
+        user = cur.fetchone()
+        if not user or not verify_password(
+            password,
+            user["password_salt"],
+            user["password_hash"],
+        ):
+            raise HTTPException(status_code=401, detail="Invalid email or password.")
+        session_token = create_auth_session(conn, user["id"])
+
+    response.set_cookie(
+        SESSION_COOKIE_NAME,
+        session_token,
+        httponly=True,
+        samesite=SESSION_COOKIE_SAMESITE,
+        secure=SESSION_COOKIE_SECURE,
+        max_age=SESSION_DURATION_HOURS * 3600,
+        path="/",
+    )
+    return auth_user_payload(user)
 
 
 @app.get("/api/auth/verify", response_model=AuthVerifyOut)
@@ -2194,14 +2321,19 @@ def list_users(request: Request) -> List[UserOut]:
 def create_user(payload: UserIn, request: Request) -> UserOut:
     user_id = str(uuid.uuid4())
     now = now_iso()
+    raw_password = (payload.password or "").strip() or DEFAULT_USER_PASSWORD
+    if not raw_password:
+        raise HTTPException(status_code=400, detail="Password is required")
+    password_salt, password_hash = create_password_credentials(raw_password)
     with get_db() as conn:
         require_session_role(conn, request, {"admin"})
         cur = conn.cursor()
         cur.execute(
             """
             INSERT INTO User (
-                id, first_name, last_name, email, phone, job_title, organization, role, created_at, updated_at
-            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                id, first_name, last_name, email, phone, job_title, organization, role,
+                password_salt, password_hash, created_at, updated_at
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
             """,
             (
                 user_id,
@@ -2212,6 +2344,8 @@ def create_user(payload: UserIn, request: Request) -> UserOut:
                 payload.job_title.strip(),
                 payload.organization.strip(),
                 payload.role.strip(),
+                password_salt,
+                password_hash,
                 now,
                 now,
             ),
@@ -2235,12 +2369,18 @@ def update_user(user_id: str, payload: UserUpdate, request: Request) -> UserOut:
             if key == "email" and value:
                 value = value.lower()
             data[key] = value
+        password_value = updates.get("password")
+        if isinstance(password_value, str) and password_value.strip():
+            password_salt, password_hash = create_password_credentials(password_value.strip())
+            data["password_salt"] = password_salt
+            data["password_hash"] = password_hash
         data["updated_at"] = now_iso()
         cur = conn.cursor()
         cur.execute(
             """
             UPDATE User
-            SET first_name = ?, last_name = ?, email = ?, phone = ?, job_title = ?, organization = ?, role = ?, updated_at = ?
+            SET first_name = ?, last_name = ?, email = ?, phone = ?, job_title = ?, organization = ?, role = ?,
+                password_salt = ?, password_hash = ?, updated_at = ?
             WHERE id = ?
             """,
             (
@@ -2251,6 +2391,8 @@ def update_user(user_id: str, payload: UserUpdate, request: Request) -> UserOut:
                 data["job_title"],
                 data["organization"],
                 data["role"],
+                data.get("password_salt"),
+                data.get("password_hash"),
                 data["updated_at"],
                 user_id,
             ),

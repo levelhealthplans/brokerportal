@@ -6,7 +6,7 @@ import {
   useState,
   type ReactNode,
 } from "react";
-import { AuthUser, getAuthMe, logoutAuth, requestMagicLink as requestMagicLinkApi } from "./api";
+import { AuthUser, getAuthMe, loginWithPassword, logoutAuth } from "./api";
 
 export type AccessRole = "broker" | "sponsor" | "admin";
 
@@ -17,7 +17,7 @@ type AccessContextValue = {
   user: AuthUser | null;
   loading: boolean;
   isAuthenticated: boolean;
-  requestMagicLink: (email: string) => Promise<{ status: string; link?: string }>;
+  login: (email: string, password: string) => Promise<void>;
   refreshSession: () => Promise<void>;
   logout: () => Promise<void>;
   setUser: (user: AuthUser | null) => void;
@@ -49,8 +49,9 @@ export function AccessProvider({ children }: { children: ReactNode }) {
     refreshSession();
   }, []);
 
-  const requestMagicLink = async (email: string) => {
-    return requestMagicLinkApi(email.trim().toLowerCase());
+  const login = async (email: string, password: string) => {
+    const authed = await loginWithPassword(email.trim().toLowerCase(), password);
+    setUser(authed);
   };
 
   const logout = async () => {
@@ -68,7 +69,7 @@ export function AccessProvider({ children }: { children: ReactNode }) {
       user,
       loading,
       isAuthenticated: Boolean(user),
-      requestMagicLink,
+      login,
       refreshSession,
       logout,
       setUser,
