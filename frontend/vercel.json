@@ -12,6 +12,10 @@
     {
       "source": "/uploads/:path*",
       "destination": "https://level-health-backend.onrender.com/uploads/:path*"
+    },
+    {
+      "source": "/(.*)",
+      "destination": "/index.html"
     }
   ]
 }
