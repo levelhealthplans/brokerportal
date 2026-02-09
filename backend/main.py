@@ -7,6 +7,7 @@ import os
 import secrets
 import shutil
 import sqlite3
+import threading
 import uuid
 from datetime import datetime, timedelta
 from pathlib import Path
@@ -2548,6 +2549,19 @@ def update_quote_hubspot_sync_state(
     conn.commit()
 
 
+def sync_quote_to_hubspot_async(quote_id: str, *, create_if_missing: bool) -> None:
+    def worker() -> None:
+        try:
+            with get_db() as conn:
+                sync_quote_to_hubspot(conn, quote_id, create_if_missing=create_if_missing)
+        except Exception:
+            # Best-effort background sync; quote save should never fail because HubSpot is slow/unavailable.
+            return
+
+    thread = threading.Thread(target=worker, daemon=True)
+    thread.start()
+
+
 def sync_quote_to_hubspot(conn: sqlite3.Connection, quote_id: str, *, create_if_missing: bool) -> None:
     settings = read_hubspot_settings(include_token=True)
     if not settings["enabled"] or not settings["sync_quote_to_hubspot"]:
@@ -3444,7 +3458,7 @@ def create_quote(payload: QuoteCreate, request: Request) -> QuoteOut:
         )
         conn.commit()
         recompute_needs_action(conn, quote_id)
-        sync_quote_to_hubspot(conn, quote_id, create_if_missing=True)
+        sync_quote_to_hubspot_async(quote_id, create_if_missing=True)
         row = fetch_quote(conn, quote_id)
 
     return QuoteOut(
@@ -4056,7 +4070,7 @@ def update_quote(quote_id: str, payload: QuoteUpdate) -> QuoteOut:
             [data.get(c) for c in columns] + [quote_id],
         )
         conn.commit()
-        sync_quote_to_hubspot(conn, quote_id, create_if_missing=True)
+        sync_quote_to_hubspot_async(quote_id, create_if_missing=True)
         row = fetch_quote(conn, quote_id)
 
     return QuoteOut(
