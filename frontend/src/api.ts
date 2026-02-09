@@ -28,6 +28,10 @@ export type Quote = {
   assigned_user_id?: string | null;
   manual_network?: string | null;
   proposal_url?: string | null;
+  hubspot_ticket_id?: string | null;
+  hubspot_ticket_url?: string | null;
+  hubspot_last_synced_at?: string | null;
+  hubspot_sync_error?: string | null;
   status: string;
   version: number;
   needs_action: boolean;
@@ -238,6 +242,55 @@ export type NetworkMapping = {
 export type NetworkSettings = {
   default_network: string;
   coverage_threshold: number;
+};
+
+export type HubSpotSettings = {
+  enabled: boolean;
+  portal_id: string;
+  pipeline_id: string;
+  default_stage_id: string;
+  sync_quote_to_hubspot: boolean;
+  sync_hubspot_to_quote: boolean;
+  ticket_subject_template: string;
+  ticket_content_template: string;
+  property_mappings: Record<string, string>;
+  quote_status_to_stage: Record<string, string>;
+  stage_to_quote_status: Record<string, string>;
+  token_configured: boolean;
+};
+
+export type HubSpotSettingsUpdate = {
+  enabled: boolean;
+  portal_id?: string;
+  pipeline_id?: string;
+  default_stage_id?: string;
+  sync_quote_to_hubspot: boolean;
+  sync_hubspot_to_quote: boolean;
+  ticket_subject_template?: string;
+  ticket_content_template?: string;
+  property_mappings?: Record<string, string>;
+  quote_status_to_stage?: Record<string, string>;
+  stage_to_quote_status?: Record<string, string>;
+  private_app_token?: string;
+};
+
+export type HubSpotTestResponse = {
+  status: string;
+  pipelines_found: number;
+};
+
+export type HubSpotPipeline = {
+  id: string;
+  label: string;
+  stages: { id: string; label: string }[];
+};
+
+export type HubSpotSyncResponse = {
+  status: string;
+  quote_id: string;
+  ticket_id?: string | null;
+  quote_status: string;
+  ticket_stage?: string | null;
 };
 
 export type CleanupUnassignedResult = {
@@ -498,6 +551,34 @@ export function updateNetworkSettings(payload: NetworkSettings) {
 
 export function cleanupUnassignedRecords() {
   return request<CleanupUnassignedResult>("/admin/cleanup-unassigned-records", {
+    method: "POST",
+  });
+}
+
+export function getHubSpotSettings() {
+  return request<HubSpotSettings>("/integrations/hubspot/settings");
+}
+
+export function updateHubSpotSettings(payload: HubSpotSettingsUpdate) {
+  return request<HubSpotSettings>("/integrations/hubspot/settings", {
+    method: "PUT",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(payload),
+  });
+}
+
+export function testHubSpotConnection() {
+  return request<HubSpotTestResponse>("/integrations/hubspot/test-connection", {
+    method: "POST",
+  });
+}
+
+export function getHubSpotPipelines() {
+  return request<HubSpotPipeline[]>("/integrations/hubspot/pipelines");
+}
+
+export function syncQuoteFromHubSpot(quoteId: string) {
+  return request<HubSpotSyncResponse>(`/integrations/hubspot/sync-quote/${quoteId}`, {
     method: "POST",
   });
 }

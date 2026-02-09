@@ -11,6 +11,8 @@ import uuid
 from datetime import datetime, timedelta
 from pathlib import Path
 from typing import Any, Dict, List, Optional
+from urllib import error as urlerror
+from urllib import parse as urlparse
 from urllib import request as urlrequest
 
 import openpyxl
@@ -37,6 +39,7 @@ else:
     UPLOADS_DIR = UPLOADS_DIR.resolve()
 NETWORK_OPTIONS_PATH = (BASE_DIR / "data" / "network_options.csv").resolve()
 NETWORK_SETTINGS_PATH = (BASE_DIR / "data" / "network_settings.json").resolve()
+HUBSPOT_SETTINGS_PATH = (BASE_DIR / "data" / "hubspot_settings.json").resolve()
 
 SESSION_COOKIE_SECURE = os.getenv("SESSION_COOKIE_SECURE", "false").strip().lower() in {
     "1",
@@ -98,6 +101,7 @@ TASK_STATE_CANONICAL = {
 }
 ALLOWED_USER_ROLES = {"admin", "broker", "sponsor"}
 PASSWORD_MIN_LENGTH = 8
+HUBSPOT_API_BASE = "https://api.hubapi.com"
 
 app = FastAPI(title="Level Health Broker Portal API")
 
@@ -247,6 +251,10 @@ def init_db() -> None:
                 assigned_user_id TEXT,
                 manual_network TEXT,
                 proposal_url TEXT,
+                hubspot_ticket_id TEXT,
+                hubspot_ticket_url TEXT,
+                hubspot_last_synced_at TEXT,
+                hubspot_sync_error TEXT,
                 status TEXT,
                 version INTEGER,
                 needs_action INTEGER,
@@ -402,6 +410,14 @@ def init_db() -> None:
             cur.execute("ALTER TABLE Quote ADD COLUMN manual_network TEXT")
         if "proposal_url" not in quote_cols:
             cur.execute("ALTER TABLE Quote ADD COLUMN proposal_url TEXT")
+        if "hubspot_ticket_id" not in quote_cols:
+            cur.execute("ALTER TABLE Quote ADD COLUMN hubspot_ticket_id TEXT")
+        if "hubspot_ticket_url" not in quote_cols:
+            cur.execute("ALTER TABLE Quote ADD COLUMN hubspot_ticket_url TEXT")
+        if "hubspot_last_synced_at" not in quote_cols:
+            cur.execute("ALTER TABLE Quote ADD COLUMN hubspot_last_synced_at TEXT")
+        if "hubspot_sync_error" not in quote_cols:
+            cur.execute("ALTER TABLE Quote ADD COLUMN hubspot_sync_error TEXT")
         if "employer_street" not in quote_cols:
             cur.execute("ALTER TABLE Quote ADD COLUMN employer_street TEXT")
         if "employer_city" not in quote_cols:
@@ -912,6 +928,10 @@ class QuoteOut(BaseModel):
     assigned_user_id: Optional[str]
     manual_network: Optional[str]
     proposal_url: Optional[str]
+    hubspot_ticket_id: Optional[str]
+    hubspot_ticket_url: Optional[str]
+    hubspot_last_synced_at: Optional[str]
+    hubspot_sync_error: Optional[str]
     status: str
     version: int
     needs_action: bool
@@ -1705,6 +1725,60 @@ class NetworkSettingsOut(BaseModel):
     coverage_threshold: float
 
 
+class HubSpotSettingsOut(BaseModel):
+    enabled: bool
+    portal_id: str
+    pipeline_id: str
+    default_stage_id: str
+    sync_quote_to_hubspot: bool
+    sync_hubspot_to_quote: bool
+    ticket_subject_template: str
+    ticket_content_template: str
+    property_mappings: Dict[str, str]
+    quote_status_to_stage: Dict[str, str]
+    stage_to_quote_status: Dict[str, str]
+    token_configured: bool
+
+
+class HubSpotSettingsUpdate(BaseModel):
+    enabled: bool
+    portal_id: Optional[str] = None
+    pipeline_id: Optional[str] = None
+    default_stage_id: Optional[str] = None
+    sync_quote_to_hubspot: bool = True
+    sync_hubspot_to_quote: bool = True
+    ticket_subject_template: Optional[str] = None
+    ticket_content_template: Optional[str] = None
+    property_mappings: Optional[Dict[str, str]] = None
+    quote_status_to_stage: Optional[Dict[str, str]] = None
+    stage_to_quote_status: Optional[Dict[str, str]] = None
+    private_app_token: Optional[str] = None
+
+
+class HubSpotTestResponse(BaseModel):
+    status: str
+    pipelines_found: int
+
+
+class HubSpotSyncResponse(BaseModel):
+    status: str
+    quote_id: str
+    ticket_id: Optional[str]
+    quote_status: str
+    ticket_stage: Optional[str]
+
+
+class HubSpotPipelineStageOut(BaseModel):
+    id: str
+    label: str
+
+
+class HubSpotPipelineOut(BaseModel):
+    id: str
+    label: str
+    stages: List[HubSpotPipelineStageOut]
+
+
 def read_network_settings() -> Dict[str, Any]:
     default = {"default_network": "Cigna_PPO", "coverage_threshold": 0.90}
     if not NETWORK_SETTINGS_PATH.exists():
@@ -1731,6 +1805,416 @@ def write_network_settings(default_network: str, coverage_threshold: float) -> D
     }
     NETWORK_SETTINGS_PATH.write_text(json.dumps(payload, indent=2), encoding="utf-8")
     return payload
+
+
+def normalize_mapping_dict(value: Optional[Dict[str, Any]]) -> Dict[str, str]:
+    mapping: Dict[str, str] = {}
+    for key, mapped_value in (value or {}).items():
+        left = str(key or "").strip()
+        right = str(mapped_value or "").strip()
+        if left and right:
+            mapping[left] = right
+    return mapping
+
+
+def default_hubspot_settings() -> Dict[str, Any]:
+    return {
+        "enabled": False,
+        "portal_id": (os.getenv("HUBSPOT_PORTAL_ID", "98238573") or "98238573").strip(),
+        "pipeline_id": (os.getenv("HUBSPOT_PIPELINE_ID", "") or "").strip(),
+        "default_stage_id": (os.getenv("HUBSPOT_DEFAULT_STAGE_ID", "") or "").strip(),
+        "sync_quote_to_hubspot": True,
+        "sync_hubspot_to_quote": True,
+        "ticket_subject_template": "Quote {{company}} ({{quote_id}})",
+        "ticket_content_template": "Company: {{company}}\nQuote ID: {{quote_id}}\nStatus: {{status}}\nEffective Date: {{effective_date}}\nBroker Org: {{broker_org}}",
+        "property_mappings": {
+            "id": "level_health_quote_id",
+            "company": "level_health_company",
+            "status": "level_health_quote_status",
+            "effective_date": "level_health_effective_date",
+            "broker_org": "level_health_broker_org",
+        },
+        "quote_status_to_stage": {},
+        "stage_to_quote_status": {},
+        "private_app_token": (os.getenv("HUBSPOT_PRIVATE_APP_TOKEN", "") or "").strip(),
+    }
+
+
+def read_hubspot_settings(*, include_token: bool = False) -> Dict[str, Any]:
+    defaults = default_hubspot_settings()
+    raw: Dict[str, Any] = {}
+    if HUBSPOT_SETTINGS_PATH.exists():
+        try:
+            loaded = json.loads(HUBSPOT_SETTINGS_PATH.read_text(encoding="utf-8"))
+            if isinstance(loaded, dict):
+                raw = loaded
+        except Exception:
+            raw = {}
+
+    token = str(raw.get("private_app_token") or defaults["private_app_token"]).strip()
+    payload = {
+        "enabled": bool(raw.get("enabled", defaults["enabled"])),
+        "portal_id": str(raw.get("portal_id") or defaults["portal_id"]).strip() or defaults["portal_id"],
+        "pipeline_id": str(raw.get("pipeline_id") or defaults["pipeline_id"]).strip(),
+        "default_stage_id": str(raw.get("default_stage_id") or defaults["default_stage_id"]).strip(),
+        "sync_quote_to_hubspot": bool(raw.get("sync_quote_to_hubspot", defaults["sync_quote_to_hubspot"])),
+        "sync_hubspot_to_quote": bool(raw.get("sync_hubspot_to_quote", defaults["sync_hubspot_to_quote"])),
+        "ticket_subject_template": str(
+            raw.get("ticket_subject_template") or defaults["ticket_subject_template"]
+        ).strip()
+        or defaults["ticket_subject_template"],
+        "ticket_content_template": str(
+            raw.get("ticket_content_template") or defaults["ticket_content_template"]
+        ).strip()
+        or defaults["ticket_content_template"],
+        "property_mappings": normalize_mapping_dict(
+            raw.get("property_mappings") or defaults["property_mappings"]
+        ),
+        "quote_status_to_stage": normalize_mapping_dict(raw.get("quote_status_to_stage")),
+        "stage_to_quote_status": normalize_mapping_dict(raw.get("stage_to_quote_status")),
+        "token_configured": bool(token),
+    }
+    if include_token:
+        payload["private_app_token"] = token
+    return payload
+
+
+def write_hubspot_settings(
+    payload: HubSpotSettingsUpdate,
+    *,
+    existing_token: Optional[str],
+) -> Dict[str, Any]:
+    HUBSPOT_SETTINGS_PATH.parent.mkdir(parents=True, exist_ok=True)
+    current = read_hubspot_settings(include_token=True)
+    current_token = (existing_token if existing_token is not None else current.get("private_app_token")) or ""
+    next_token = current_token
+    if payload.private_app_token is not None:
+        next_token = payload.private_app_token.strip()
+
+    saved = {
+        "enabled": bool(payload.enabled),
+        "portal_id": str(payload.portal_id or current["portal_id"]).strip() or current["portal_id"],
+        "pipeline_id": str(payload.pipeline_id or "").strip(),
+        "default_stage_id": str(payload.default_stage_id or "").strip(),
+        "sync_quote_to_hubspot": bool(payload.sync_quote_to_hubspot),
+        "sync_hubspot_to_quote": bool(payload.sync_hubspot_to_quote),
+        "ticket_subject_template": str(
+            payload.ticket_subject_template or current["ticket_subject_template"]
+        ).strip()
+        or current["ticket_subject_template"],
+        "ticket_content_template": str(
+            payload.ticket_content_template or current["ticket_content_template"]
+        ).strip()
+        or current["ticket_content_template"],
+        "property_mappings": normalize_mapping_dict(
+            payload.property_mappings
+            if payload.property_mappings is not None
+            else current["property_mappings"]
+        ),
+        "quote_status_to_stage": normalize_mapping_dict(
+            payload.quote_status_to_stage
+            if payload.quote_status_to_stage is not None
+            else current["quote_status_to_stage"]
+        ),
+        "stage_to_quote_status": normalize_mapping_dict(
+            payload.stage_to_quote_status
+            if payload.stage_to_quote_status is not None
+            else current["stage_to_quote_status"]
+        ),
+        "private_app_token": next_token,
+    }
+    HUBSPOT_SETTINGS_PATH.write_text(json.dumps(saved, indent=2), encoding="utf-8")
+    return read_hubspot_settings(include_token=False)
+
+
+def hubspot_api_request(
+    token: str,
+    method: str,
+    path: str,
+    *,
+    body: Optional[Dict[str, Any]] = None,
+    query: Optional[Dict[str, Any]] = None,
+) -> Dict[str, Any]:
+    normalized_token = (token or "").strip()
+    if not normalized_token:
+        raise HTTPException(status_code=400, detail="HubSpot private app token is not configured")
+
+    url = f"{HUBSPOT_API_BASE}{path}"
+    if query:
+        qs = urlparse.urlencode(query, doseq=True)
+        url = f"{url}?{qs}"
+
+    data = None
+    headers = {"Authorization": f"Bearer {normalized_token}"}
+    if body is not None:
+        data = json.dumps(body).encode("utf-8")
+        headers["Content-Type"] = "application/json"
+
+    req = urlrequest.Request(
+        url,
+        data=data,
+        headers=headers,
+        method=method.upper(),
+    )
+    try:
+        with urlrequest.urlopen(req, timeout=20) as resp:
+            raw = resp.read().decode("utf-8").strip()
+            if not raw:
+                return {}
+            parsed = json.loads(raw)
+            if isinstance(parsed, dict):
+                return parsed
+            return {"results": parsed}
+    except urlerror.HTTPError as exc:
+        detail = ""
+        try:
+            detail = exc.read().decode("utf-8")
+        except Exception:
+            detail = str(exc)
+        parsed_message = detail
+        try:
+            parsed = json.loads(detail)
+            parsed_message = str(parsed.get("message") or parsed.get("detail") or detail)
+        except Exception:
+            parsed_message = detail or str(exc)
+        raise HTTPException(
+            status_code=502,
+            detail=f"HubSpot API error ({exc.code}): {parsed_message}",
+        )
+    except HTTPException:
+        raise
+    except Exception as exc:
+        raise HTTPException(status_code=502, detail=f"HubSpot API request failed: {exc}")
+
+
+def build_hubspot_ticket_url(portal_id: str, ticket_id: str) -> Optional[str]:
+    portal = (portal_id or "").strip()
+    ticket = (ticket_id or "").strip()
+    if not portal or not ticket:
+        return None
+    return f"https://app.hubspot.com/contacts/{portal}/record/0-5/{ticket}"
+
+
+def render_hubspot_template(template: str, quote: Dict[str, Any]) -> str:
+    rendered = template
+    for key, value in quote.items():
+        rendered = rendered.replace(f"{{{{{key}}}}}", str(value or ""))
+    return rendered
+
+
+def to_hubspot_property_value(value: Any) -> str:
+    if value is None:
+        return ""
+    if isinstance(value, bool):
+        return "true" if value else "false"
+    return str(value)
+
+
+def build_hubspot_ticket_properties(quote: Dict[str, Any], settings: Dict[str, Any]) -> Dict[str, str]:
+    status_key = str(quote.get("status") or "").strip()
+    mapped_stage = settings["quote_status_to_stage"].get(status_key)
+    stage_id = (mapped_stage or settings.get("default_stage_id") or "").strip()
+
+    properties: Dict[str, str] = {
+        "subject": render_hubspot_template(settings["ticket_subject_template"], quote),
+        "content": render_hubspot_template(settings["ticket_content_template"], quote),
+    }
+    if settings.get("pipeline_id"):
+        properties["hs_pipeline"] = settings["pipeline_id"]
+    if stage_id:
+        properties["hs_pipeline_stage"] = stage_id
+
+    property_mappings = settings.get("property_mappings") or {}
+    for local_key, hubspot_property in property_mappings.items():
+        if not hubspot_property:
+            continue
+        if local_key in quote:
+            properties[hubspot_property] = to_hubspot_property_value(quote.get(local_key))
+    return {key: value for key, value in properties.items() if value is not None}
+
+
+def update_quote_hubspot_sync_state(
+    conn: sqlite3.Connection,
+    quote_id: str,
+    *,
+    ticket_id: Optional[str] = None,
+    ticket_url: Optional[str] = None,
+    sync_error: Optional[str] = None,
+) -> None:
+    cur = conn.cursor()
+    cur.execute(
+        """
+        UPDATE Quote
+        SET hubspot_ticket_id = COALESCE(?, hubspot_ticket_id),
+            hubspot_ticket_url = COALESCE(?, hubspot_ticket_url),
+            hubspot_last_synced_at = ?,
+            hubspot_sync_error = ?,
+            updated_at = ?
+        WHERE id = ?
+        """,
+        (
+            ticket_id,
+            ticket_url,
+            now_iso(),
+            (sync_error or "").strip() or None,
+            now_iso(),
+            quote_id,
+        ),
+    )
+    conn.commit()
+
+
+def sync_quote_to_hubspot(conn: sqlite3.Connection, quote_id: str, *, create_if_missing: bool) -> None:
+    settings = read_hubspot_settings(include_token=True)
+    if not settings["enabled"] or not settings["sync_quote_to_hubspot"]:
+        return
+    token = (settings.get("private_app_token") or "").strip()
+    if not token:
+        update_quote_hubspot_sync_state(
+            conn,
+            quote_id,
+            sync_error="HubSpot token is not configured",
+        )
+        return
+
+    quote_row = fetch_quote(conn, quote_id)
+    quote = dict(quote_row)
+    properties = build_hubspot_ticket_properties(quote, settings)
+    ticket_id = (quote.get("hubspot_ticket_id") or "").strip()
+    if not ticket_id and not create_if_missing:
+        return
+
+    try:
+        if ticket_id:
+            hubspot_api_request(
+                token,
+                "PATCH",
+                f"/crm/v3/objects/tickets/{ticket_id}",
+                body={"properties": properties},
+            )
+            ticket_url = build_hubspot_ticket_url(settings["portal_id"], ticket_id)
+            update_quote_hubspot_sync_state(
+                conn,
+                quote_id,
+                ticket_id=ticket_id,
+                ticket_url=ticket_url,
+                sync_error=None,
+            )
+            return
+
+        if not settings.get("pipeline_id") or not properties.get("hs_pipeline_stage"):
+            update_quote_hubspot_sync_state(
+                conn,
+                quote_id,
+                sync_error="HubSpot pipeline/stage is not configured",
+            )
+            return
+
+        created = hubspot_api_request(
+            token,
+            "POST",
+            "/crm/v3/objects/tickets",
+            body={"properties": properties},
+        )
+        new_ticket_id = str(created.get("id") or "").strip()
+        ticket_url = build_hubspot_ticket_url(settings["portal_id"], new_ticket_id)
+        update_quote_hubspot_sync_state(
+            conn,
+            quote_id,
+            ticket_id=new_ticket_id or None,
+            ticket_url=ticket_url,
+            sync_error=None,
+        )
+    except Exception as exc:
+        detail = str(exc)
+        if isinstance(exc, HTTPException):
+            detail = str(exc.detail)
+        update_quote_hubspot_sync_state(conn, quote_id, sync_error=detail)
+
+
+def list_hubspot_ticket_pipelines(settings: Dict[str, Any]) -> List[Dict[str, Any]]:
+    token = (settings.get("private_app_token") or "").strip()
+    raw = hubspot_api_request(token, "GET", "/crm/v3/pipelines/tickets")
+    pipelines: List[Dict[str, Any]] = []
+    for item in raw.get("results", []):
+        stage_rows: List[Dict[str, str]] = []
+        for stage in item.get("stages", []):
+            stage_id = str(stage.get("id") or "").strip()
+            stage_label = str(stage.get("label") or stage.get("displayOrder") or stage_id).strip()
+            if stage_id:
+                stage_rows.append({"id": stage_id, "label": stage_label or stage_id})
+        pipelines.append(
+            {
+                "id": str(item.get("id") or "").strip(),
+                "label": str(item.get("label") or item.get("id") or "").strip(),
+                "stages": stage_rows,
+            }
+        )
+    return [pipeline for pipeline in pipelines if pipeline["id"]]
+
+
+def sync_quote_from_hubspot(conn: sqlite3.Connection, quote_id: str) -> Dict[str, Any]:
+    settings = read_hubspot_settings(include_token=True)
+    if not settings["enabled"]:
+        raise HTTPException(status_code=400, detail="HubSpot integration is disabled")
+    if not settings["sync_hubspot_to_quote"]:
+        raise HTTPException(status_code=400, detail="HubSpot -> portal sync is disabled")
+    token = (settings.get("private_app_token") or "").strip()
+    if not token:
+        raise HTTPException(status_code=400, detail="HubSpot token is not configured")
+
+    quote = dict(fetch_quote(conn, quote_id))
+    ticket_id = str(quote.get("hubspot_ticket_id") or "").strip()
+    if not ticket_id:
+        raise HTTPException(status_code=400, detail="Quote is not linked to a HubSpot ticket")
+
+    ticket = hubspot_api_request(
+        token,
+        "GET",
+        f"/crm/v3/objects/tickets/{ticket_id}",
+        query={"properties": ["subject", "hs_pipeline", "hs_pipeline_stage"]},
+    )
+    properties = ticket.get("properties") or {}
+    ticket_stage = str(properties.get("hs_pipeline_stage") or "").strip()
+    next_status = settings["stage_to_quote_status"].get(ticket_stage)
+
+    cur = conn.cursor()
+    updates: List[str] = []
+    params: List[Any] = []
+    if next_status and next_status != quote["status"]:
+        updates.append("status = ?")
+        params.append(next_status)
+
+    updates.extend(
+        [
+            "hubspot_ticket_url = ?",
+            "hubspot_last_synced_at = ?",
+            "hubspot_sync_error = ?",
+            "updated_at = ?",
+        ]
+    )
+    params.extend(
+        [
+            build_hubspot_ticket_url(settings["portal_id"], ticket_id),
+            now_iso(),
+            None,
+            now_iso(),
+        ]
+    )
+    params.append(quote_id)
+    cur.execute(
+        f"UPDATE Quote SET {', '.join(updates)} WHERE id = ?",
+        params,
+    )
+    conn.commit()
+
+    refreshed = dict(fetch_quote(conn, quote_id))
+    return {
+        "quote_id": quote_id,
+        "ticket_id": ticket_id,
+        "quote_status": refreshed.get("status") or "",
+        "ticket_stage": ticket_stage or None,
+    }
 
 
 def recompute_needs_action(conn: sqlite3.Connection, quote_id: str) -> None:
@@ -2118,6 +2602,51 @@ def update_network_settings(payload: NetworkSettingsOut, request: Request) -> Ne
     return NetworkSettingsOut(**saved)
 
 
+@app.get("/api/integrations/hubspot/settings", response_model=HubSpotSettingsOut)
+def get_hubspot_settings(request: Request) -> HubSpotSettingsOut:
+    with get_db() as conn:
+        require_session_role(conn, request, {"admin"})
+    return HubSpotSettingsOut(**read_hubspot_settings(include_token=False))
+
+
+@app.put("/api/integrations/hubspot/settings", response_model=HubSpotSettingsOut)
+def update_hubspot_settings(payload: HubSpotSettingsUpdate, request: Request) -> HubSpotSettingsOut:
+    with get_db() as conn:
+        require_session_role(conn, request, {"admin"})
+    current = read_hubspot_settings(include_token=True)
+    saved = write_hubspot_settings(
+        payload,
+        existing_token=current.get("private_app_token"),
+    )
+    return HubSpotSettingsOut(**saved)
+
+
+@app.post("/api/integrations/hubspot/test-connection", response_model=HubSpotTestResponse)
+def test_hubspot_connection(request: Request) -> HubSpotTestResponse:
+    with get_db() as conn:
+        require_session_role(conn, request, {"admin"})
+    settings = read_hubspot_settings(include_token=True)
+    pipelines = list_hubspot_ticket_pipelines(settings)
+    return HubSpotTestResponse(status="ok", pipelines_found=len(pipelines))
+
+
+@app.get("/api/integrations/hubspot/pipelines", response_model=List[HubSpotPipelineOut])
+def get_hubspot_ticket_pipelines(request: Request) -> List[HubSpotPipelineOut]:
+    with get_db() as conn:
+        require_session_role(conn, request, {"admin"})
+    settings = read_hubspot_settings(include_token=True)
+    pipelines = list_hubspot_ticket_pipelines(settings)
+    return [HubSpotPipelineOut(**row) for row in pipelines]
+
+
+@app.post("/api/integrations/hubspot/sync-quote/{quote_id}", response_model=HubSpotSyncResponse)
+def sync_quote_from_hubspot_endpoint(quote_id: str, request: Request) -> HubSpotSyncResponse:
+    with get_db() as conn:
+        require_session_role(conn, request, {"admin"})
+        result = sync_quote_from_hubspot(conn, quote_id)
+    return HubSpotSyncResponse(status="ok", **result)
+
+
 @app.get("/api/quotes", response_model=List[QuoteListOut])
 def list_quotes(
     request: Request, role: Optional[str] = None, email: Optional[str] = None
@@ -2228,6 +2757,7 @@ def create_quote(payload: QuoteCreate, request: Request) -> QuoteOut:
         )
         conn.commit()
         recompute_needs_action(conn, quote_id)
+        sync_quote_to_hubspot(conn, quote_id, create_if_missing=True)
         row = fetch_quote(conn, quote_id)
 
     return QuoteOut(
@@ -2839,6 +3369,7 @@ def update_quote(quote_id: str, payload: QuoteUpdate) -> QuoteOut:
             [data.get(c) for c in columns] + [quote_id],
         )
         conn.commit()
+        sync_quote_to_hubspot(conn, quote_id, create_if_missing=True)
         row = fetch_quote(conn, quote_id)
 
     return QuoteOut(

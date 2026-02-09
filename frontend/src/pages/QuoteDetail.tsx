@@ -2,6 +2,7 @@ import { useEffect, useMemo, useState } from "react";
 import { Link, useLocation, useParams } from "react-router-dom";
 import {
   assignNetwork,
+  syncQuoteFromHubSpot,
   getQuote,
   getNetworkOptions,
   resolveStandardization,
@@ -589,6 +590,22 @@ export default function QuoteDetail() {
     }
   };
 
+  const handleSyncFromHubSpot = async () => {
+    setBusy(true);
+    setError(null);
+    try {
+      const result = await syncQuoteFromHubSpot(quoteId);
+      setStatusMessage(
+        `Synced from HubSpot. Ticket stage: ${result.ticket_stage || "n/a"} · Quote status: ${result.quote_status}`
+      );
+      refresh();
+    } catch (err: any) {
+      setError(err.message);
+    } finally {
+      setBusy(false);
+    }
+  };
+
   if (!data) {
     return <div className="section">Loading quote...</div>;
   }
@@ -619,6 +636,24 @@ export default function QuoteDetail() {
         </span>
         <strong>Version</strong>
         <span>v{quote.version}</span>
+        <strong>HubSpot Ticket</strong>
+        <span>
+          {quote.hubspot_ticket_url ? (
+            <a href={quote.hubspot_ticket_url} target="_blank" rel="noreferrer">
+              {quote.hubspot_ticket_id || "Open Ticket"}
+            </a>
+          ) : (
+            quote.hubspot_ticket_id || "Not linked"
+          )}
+        </span>
+        <strong>HubSpot Last Sync</strong>
+        <span>
+          {quote.hubspot_last_synced_at
+            ? new Date(quote.hubspot_last_synced_at).toLocaleString()
+            : "Never"}
+        </span>
+        <strong>HubSpot Sync Error</strong>
+        <span>{quote.hubspot_sync_error || "—"}</span>
       </div>
 
       <div className="section-header">
@@ -640,6 +675,16 @@ export default function QuoteDetail() {
                   ))}
                 </select>
               </label>
+              {quote.hubspot_ticket_id && (
+                <button
+                  className="button ghost"
+                  type="button"
+                  onClick={handleSyncFromHubSpot}
+                  disabled={busy}
+                >
+                  Sync from HubSpot
+                </button>
+              )}
             </>
           )}
           <button

@@ -5,10 +5,16 @@ import {
   createNetworkOption,
   deleteNetworkMapping,
   deleteNetworkOption,
+  getHubSpotPipelines,
+  getHubSpotSettings,
   getNetworkMappings,
   getNetworkOptions,
   getNetworkSettings,
+  HubSpotPipeline,
+  HubSpotSettings,
   NetworkMapping,
+  testHubSpotConnection,
+  updateHubSpotSettings,
   updateNetworkMapping,
   updateNetworkOption,
   updateNetworkSettings,
@@ -21,9 +27,55 @@ import {
 import { useAutoDismissMessage } from "../hooks/useAutoDismissMessage";
 import { formatNetworkLabel } from "../utils/formatNetwork";
 
+const EMPTY_HUBSPOT_SETTINGS: HubSpotSettings = {
+  enabled: false,
+  portal_id: "98238573",
+  pipeline_id: "",
+  default_stage_id: "",
+  sync_quote_to_hubspot: true,
+  sync_hubspot_to_quote: true,
+  ticket_subject_template: "Quote {{company}} ({{quote_id}})",
+  ticket_content_template:
+    "Company: {{company}}\nQuote ID: {{quote_id}}\nStatus: {{status}}\nEffective Date: {{effective_date}}\nBroker Org: {{broker_org}}",
+  property_mappings: {},
+  quote_status_to_stage: {},
+  stage_to_quote_status: {},
+  token_configured: false,
+};
+
+function formatMappingLines(mapping: Record<string, string>) {
+  return Object.entries(mapping)
+    .map(([left, right]) => `${left}=${right}`)
+    .join("\n");
+}
+
+function parseMappingLines(raw: string) {
+  const mapping: Record<string, string> = {};
+  for (const line of raw.split("\n")) {
+    const trimmed = line.trim();
+    if (!trimmed || trimmed.startsWith("#")) continue;
+    const separatorIndex = trimmed.indexOf("=");
+    if (separatorIndex <= 0 || separatorIndex >= trimmed.length - 1) continue;
+    const key = trimmed.slice(0, separatorIndex).trim();
+    const value = trimmed.slice(separatorIndex + 1).trim();
+    if (!key || !value) continue;
+    mapping[key] = value;
+  }
+  return mapping;
+}
+
 export default function Configuration() {
   const [networkOptions, setNetworkOptions] = useState<string[]>([]);
   const [networkMappings, setNetworkMappings] = useState<NetworkMapping[]>([]);
+  const [hubspotSettings, setHubspotSettings] = useState<HubSpotSettings>(
+    EMPTY_HUBSPOT_SETTINGS
+  );
+  const [hubspotTokenInput, setHubspotTokenInput] = useState("");
+  const [hubspotPropertyMappingsText, setHubspotPropertyMappingsText] = useState("");
+  const [hubspotQuoteStatusToStageText, setHubspotQuoteStatusToStageText] = useState("");
+  const [hubspotStageToQuoteStatusText, setHubspotStageToQuoteStatusText] = useState("");
+  const [hubspotPipelines, setHubspotPipelines] = useState<HubSpotPipeline[]>([]);
+  const [hubspotTestMessage, setHubspotTestMessage] = useState<string | null>(null);
   const [settings, setSettings] = useState({
     default_network: "Cigna_PPO",
     coverage_threshold: 0.9,
@@ -42,11 +94,27 @@ export default function Configuration() {
   const statusMessageFading = useAutoDismissMessage(statusMessage, setStatusMessage, 5000, 500);
 
   const loadAll = () => {
-    Promise.all([getNetworkOptions(), getNetworkMappings(), getNetworkSettings()])
-      .then(([options, mappings, nextSettings]) => {
+    Promise.all([
+      getNetworkOptions(),
+      getNetworkMappings(),
+      getNetworkSettings(),
+      getHubSpotSettings(),
+    ])
+      .then(([options, mappings, nextSettings, nextHubspotSettings]) => {
         setNetworkOptions(options);
         setNetworkMappings(mappings);
         setSettings(nextSettings);
+        setHubspotSettings(nextHubspotSettings);
+        setHubspotPropertyMappingsText(formatMappingLines(nextHubspotSettings.property_mappings));
+        setHubspotQuoteStatusToStageText(
+          formatMappingLines(nextHubspotSettings.quote_status_to_stage)
+        );
+        setHubspotStageToQuoteStatusText(
+          formatMappingLines(nextHubspotSettings.stage_to_quote_status)
+        );
+        setHubspotTokenInput("");
+        setHubspotPipelines([]);
+        setHubspotTestMessage(null);
         setNewMapping((prev) => ({
           ...prev,
           network: prev.network || nextSettings.default_network || "Cigna_PPO",
@@ -208,6 +276,63 @@ export default function Configuration() {
     }
   };
 
+  const handleSaveHubSpotSettings = async () => {
+    setBusy(true);
+    setError(null);
+    try {
+      const next = await updateHubSpotSettings({
+        enabled: hubspotSettings.enabled,
+        portal_id: hubspotSettings.portal_id.trim(),
+        pipeline_id: hubspotSettings.pipeline_id.trim(),
+        default_stage_id: hubspotSettings.default_stage_id.trim(),
+        sync_quote_to_hubspot: hubspotSettings.sync_quote_to_hubspot,
+        sync_hubspot_to_quote: hubspotSettings.sync_hubspot_to_quote,
+        ticket_subject_template: hubspotSettings.ticket_subject_template,
+        ticket_content_template: hubspotSettings.ticket_content_template,
+        property_mappings: parseMappingLines(hubspotPropertyMappingsText),
+        quote_status_to_stage: parseMappingLines(hubspotQuoteStatusToStageText),
+        stage_to_quote_status: parseMappingLines(hubspotStageToQuoteStatusText),
+        private_app_token: hubspotTokenInput.trim() ? hubspotTokenInput.trim() : undefined,
+      });
+      setHubspotSettings(next);
+      setHubspotTokenInput("");
+      setStatusMessage("HubSpot settings saved.");
+    } catch (err: any) {
+      setError(err.message);
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  const handleTestHubSpot = async () => {
+    setBusy(true);
+    setError(null);
+    try {
+      const result = await testHubSpotConnection();
+      setHubspotTestMessage(`Connection successful. Pipelines found: ${result.pipelines_found}.`);
+      setStatusMessage("HubSpot connection test passed.");
+    } catch (err: any) {
+      setError(err.message);
+      setHubspotTestMessage(null);
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  const handleLoadHubSpotPipelines = async () => {
+    setBusy(true);
+    setError(null);
+    try {
+      const pipelines = await getHubSpotPipelines();
+      setHubspotPipelines(pipelines);
+      setStatusMessage(`Loaded ${pipelines.length} HubSpot pipelines.`);
+    } catch (err: any) {
+      setError(err.message);
+    } finally {
+      setBusy(false);
+    }
+  };
+
   const optionPagination = useMemo(
     () => paginateItems(networkOptions, optionPage, TABLE_PAGE_SIZE),
     [networkOptions, optionPage]
@@ -282,6 +407,239 @@ export default function Configuration() {
             Save Settings
           </button>
         </div>
+      </section>
+
+      <section className="section" style={{ marginTop: 12 }}>
+        <h3>HubSpot Integration (Admin)</h3>
+        <div className="helper" style={{ marginBottom: 12 }}>
+          MVP flow: a new quote creates a HubSpot ticket. Configure API token, pipeline/stage,
+          and status mappings here.
+        </div>
+        <div className="inline-actions">
+          <label style={{ minWidth: 220 }}>
+            <span style={{ display: "inline-flex", alignItems: "center", gap: 8 }}>
+              <input
+                type="checkbox"
+                checked={hubspotSettings.enabled}
+                onChange={(e) =>
+                  setHubspotSettings((prev) => ({
+                    ...prev,
+                    enabled: e.target.checked,
+                  }))
+                }
+              />
+              Enable HubSpot Integration
+            </span>
+          </label>
+          <label style={{ minWidth: 220 }}>
+            HubSpot Account ID
+            <input
+              value={hubspotSettings.portal_id}
+              onChange={(e) =>
+                setHubspotSettings((prev) => ({ ...prev, portal_id: e.target.value }))
+              }
+              placeholder="98238573"
+            />
+          </label>
+          <label style={{ minWidth: 280 }}>
+            Private App Token
+            <input
+              type="password"
+              value={hubspotTokenInput}
+              onChange={(e) => setHubspotTokenInput(e.target.value)}
+              placeholder={hubspotSettings.token_configured ? "Token saved (enter to replace)" : "pat-..."}
+            />
+          </label>
+        </div>
+        <div className="inline-actions" style={{ marginTop: 8 }}>
+          <label style={{ minWidth: 260 }}>
+            Ticket Pipeline ID
+            <input
+              value={hubspotSettings.pipeline_id}
+              onChange={(e) =>
+                setHubspotSettings((prev) => ({ ...prev, pipeline_id: e.target.value }))
+              }
+              placeholder="default"
+            />
+          </label>
+          <label style={{ minWidth: 260 }}>
+            Default Stage ID
+            <input
+              value={hubspotSettings.default_stage_id}
+              onChange={(e) =>
+                setHubspotSettings((prev) => ({
+                  ...prev,
+                  default_stage_id: e.target.value,
+                }))
+              }
+              placeholder="1"
+            />
+          </label>
+        </div>
+        <div className="inline-actions" style={{ marginTop: 8 }}>
+          <label style={{ minWidth: 220 }}>
+            <span style={{ display: "inline-flex", alignItems: "center", gap: 8 }}>
+              <input
+                type="checkbox"
+                checked={hubspotSettings.sync_quote_to_hubspot}
+                onChange={(e) =>
+                  setHubspotSettings((prev) => ({
+                    ...prev,
+                    sync_quote_to_hubspot: e.target.checked,
+                  }))
+                }
+              />
+              Quote -&gt; HubSpot Sync
+            </span>
+          </label>
+          <label style={{ minWidth: 220 }}>
+            <span style={{ display: "inline-flex", alignItems: "center", gap: 8 }}>
+              <input
+                type="checkbox"
+                checked={hubspotSettings.sync_hubspot_to_quote}
+                onChange={(e) =>
+                  setHubspotSettings((prev) => ({
+                    ...prev,
+                    sync_hubspot_to_quote: e.target.checked,
+                  }))
+                }
+              />
+              HubSpot -&gt; Quote Sync
+            </span>
+          </label>
+        </div>
+
+        <div style={{ marginTop: 10 }}>
+          <label style={{ display: "block" }}>
+            Ticket Subject Template
+            <input
+              value={hubspotSettings.ticket_subject_template}
+              onChange={(e) =>
+                setHubspotSettings((prev) => ({
+                  ...prev,
+                  ticket_subject_template: e.target.value,
+                }))
+              }
+              placeholder="Quote {{company}} ({{quote_id}})"
+            />
+          </label>
+        </div>
+
+        <div style={{ marginTop: 10 }}>
+          <label style={{ display: "block" }}>
+            Ticket Content Template
+            <textarea
+              value={hubspotSettings.ticket_content_template}
+              onChange={(e) =>
+                setHubspotSettings((prev) => ({
+                  ...prev,
+                  ticket_content_template: e.target.value,
+                }))
+              }
+              rows={4}
+            />
+          </label>
+        </div>
+
+        <div style={{ marginTop: 10 }}>
+          <label style={{ display: "block" }}>
+            Property Mappings (`local_field=hubspot_property`)
+            <textarea
+              value={hubspotPropertyMappingsText}
+              onChange={(e) => setHubspotPropertyMappingsText(e.target.value)}
+              rows={4}
+              placeholder={"id=level_health_quote_id\ncompany=level_health_company\nstatus=level_health_quote_status"}
+            />
+          </label>
+        </div>
+
+        <div style={{ marginTop: 10 }}>
+          <label style={{ display: "block" }}>
+            Quote Status -&gt; HubSpot Stage (`Quote Status=Stage ID`)
+            <textarea
+              value={hubspotQuoteStatusToStageText}
+              onChange={(e) => setHubspotQuoteStatusToStageText(e.target.value)}
+              rows={4}
+              placeholder={"Draft=1\nQuote Submitted=2\nSold=3"}
+            />
+          </label>
+        </div>
+
+        <div style={{ marginTop: 10 }}>
+          <label style={{ display: "block" }}>
+            HubSpot Stage -&gt; Quote Status (`Stage ID=Quote Status`)
+            <textarea
+              value={hubspotStageToQuoteStatusText}
+              onChange={(e) => setHubspotStageToQuoteStatusText(e.target.value)}
+              rows={4}
+              placeholder={"1=Draft\n2=Quote Submitted\n3=Sold"}
+            />
+          </label>
+        </div>
+
+        <div className="inline-actions" style={{ marginTop: 12 }}>
+          <button
+            className="button secondary"
+            type="button"
+            onClick={handleSaveHubSpotSettings}
+            disabled={busy}
+          >
+            Save HubSpot Settings
+          </button>
+          <button className="button ghost" type="button" onClick={handleTestHubSpot} disabled={busy}>
+            Test Connection
+          </button>
+          <button
+            className="button ghost"
+            type="button"
+            onClick={handleLoadHubSpotPipelines}
+            disabled={busy}
+          >
+            Load Pipelines
+          </button>
+        </div>
+
+        {hubspotTestMessage && (
+          <div className="helper" style={{ marginTop: 8 }}>
+            {hubspotTestMessage}
+          </div>
+        )}
+
+        {hubspotPipelines.length > 0 && (
+          <div style={{ marginTop: 12 }}>
+            <strong>Available Pipelines</strong>
+            <div className="helper" style={{ marginTop: 4 }}>
+              Click a stage to auto-fill pipeline and default stage IDs.
+            </div>
+            <div style={{ marginTop: 8 }}>
+              {hubspotPipelines.map((pipeline) => (
+                <div key={pipeline.id} style={{ marginBottom: 12 }}>
+                  <div>
+                    <strong>{pipeline.label}</strong> ({pipeline.id})
+                  </div>
+                  <div className="inline-actions" style={{ marginTop: 6 }}>
+                    {pipeline.stages.map((stage) => (
+                      <button
+                        key={stage.id}
+                        className="button ghost"
+                        type="button"
+                        onClick={() =>
+                          setHubspotSettings((prev) => ({
+                            ...prev,
+                            pipeline_id: pipeline.id,
+                            default_stage_id: stage.id,
+                          }))
+                        }
+                      >
+                        {stage.label} ({stage.id})
+                      </button>
+                    ))}
+                  </div>
+                </div>
+              ))}
+            </div>
+          </div>
+        )}
       </section>
 
       <section className="section" style={{ marginTop: 12 }}>
