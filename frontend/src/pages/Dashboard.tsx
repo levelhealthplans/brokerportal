@@ -26,15 +26,6 @@ type TimelineItem = {
   kind: "task" | "quote-deadline" | "effective-date";
 };
 
-const ACTIVE_QUOTE_STATUSES = new Set([
-  "Draft",
-  "Quote Submitted",
-  "Submitted",
-  "In Review",
-  "Needs Action",
-  "Proposal",
-  "Proposal Ready",
-]);
 const COMPLETED_TASK_STATES = new Set(["Done", "Complete"]);
 const FILTER_STORAGE_KEY = "dashboard_queue_filter";
 
@@ -268,29 +259,6 @@ export default function Dashboard() {
     return actionItems.filter((item) => item.tags.includes(queueFilter)).slice(0, 12);
   }, [actionItems, queueFilter]);
 
-  const activeQuotes = useMemo(
-    () => quotes.filter((quote) => ACTIVE_QUOTE_STATUSES.has(getQuoteStageLabel(quote.status))),
-    [quotes]
-  );
-
-  const latestQuote = useMemo(() => {
-    if (activeQuotes.length === 0) return null;
-    return [...activeQuotes].sort((a, b) => b.updated_at.localeCompare(a.updated_at))[0];
-  }, [activeQuotes]);
-
-  const censusPriorityQuote = useMemo(() => {
-    return quotes.find((quote) => quote.needs_action && getNeedsActionReason(quote) === "Missing census upload") || null;
-  }, [quotes, needsActionDetails]);
-
-  const assignmentPriorityQuote = useMemo(() => {
-    return (
-      quotes.find(
-        (quote) =>
-          quote.needs_action && getNeedsActionReason(quote) === "Missing network assignment"
-      ) || null
-    );
-  }, [quotes, needsActionDetails]);
-
   const timelineItems = useMemo(() => {
     const today = startOfToday();
     const timeline: TimelineItem[] = [];
@@ -389,26 +357,6 @@ export default function Dashboard() {
         <div>
           <h2>Home</h2>
           <div className="helper">Focus on your highest-priority quotes and implementation tasks first.</div>
-        </div>
-        <div className="dashboard-quick-actions">
-          <Link className="button" to="/quotes/new">
-            New Quote
-          </Link>
-          <Link className={`button secondary ${!latestQuote ? "disabled-link" : ""}`} to={latestQuote ? `/quotes/${latestQuote.id}` : "#"}>
-            Continue Last Quote
-          </Link>
-          <Link
-            className={`button ghost ${!censusPriorityQuote ? "disabled-link" : ""}`}
-            to={censusPriorityQuote ? `/quotes/${censusPriorityQuote.id}` : "#"}
-          >
-            Upload Census
-          </Link>
-          <Link
-            className={`button ghost ${!assignmentPriorityQuote ? "disabled-link" : ""}`}
-            to={assignmentPriorityQuote ? `/quotes/${assignmentPriorityQuote.id}` : "#"}
-          >
-            Run Assignment
-          </Link>
         </div>
       </section>
 
