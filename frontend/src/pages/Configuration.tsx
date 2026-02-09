@@ -109,6 +109,7 @@ export default function Configuration() {
   const [hubspotTicketProperties, setHubspotTicketProperties] = useState<HubSpotTicketProperty[]>(
     []
   );
+  const [propertySearchByField, setPropertySearchByField] = useState<Record<string, string>>({});
   const [hubspotTestMessage, setHubspotTestMessage] = useState<string | null>(null);
   const [settings, setSettings] = useState({
     default_network: "Cigna_PPO",
@@ -142,6 +143,7 @@ export default function Configuration() {
         setHubspotTokenInput("");
         setHubspotPipelines([]);
         setHubspotTicketProperties([]);
+        setPropertySearchByField({});
         setHubspotTestMessage(null);
         setNewMapping((prev) => ({
           ...prev,
@@ -502,6 +504,11 @@ export default function Configuration() {
       .sort((a, b) => a.label.localeCompare(b.label));
   }, [hubspotTicketProperties, hubspotSettings.property_mappings]);
 
+  const propertyLabelByName = useMemo(
+    () => Object.fromEntries(propertyOptions.map((property) => [property.name, property.label])),
+    [propertyOptions]
+  );
+
   const localFieldLabelByKey = useMemo(
     () =>
       Object.fromEntries(HUBSPOT_LOCAL_FIELD_OPTIONS.map((item) => [item.key, item.label])),
@@ -526,6 +533,18 @@ export default function Configuration() {
       }
       return { ...prev, property_mappings: next };
     });
+  };
+
+  const getFilteredPropertyOptions = (localField: string) => {
+    const query = (propertySearchByField[localField] || "").trim().toLowerCase();
+    if (!query) return [] as typeof propertyOptions;
+    return propertyOptions
+      .filter(
+        (property) =>
+          property.name.toLowerCase().includes(query) ||
+          property.label.toLowerCase().includes(query)
+      )
+      .slice(0, 8);
   };
 
   const setQuoteStatusStageMapping = (quoteStatus: string, stageId: string) => {
@@ -811,17 +830,57 @@ export default function Configuration() {
                 <tr key={localField}>
                   <td>{localFieldLabelByKey[localField] || localField}</td>
                   <td>
-                    <select
-                      value={hubspotSettings.property_mappings[localField] || ""}
-                      onChange={(e) => setPropertyMapping(localField, e.target.value)}
-                    >
-                      <option value="">Not mapped</option>
-                      {propertyOptions.map((property) => (
-                        <option key={property.name} value={property.name}>
-                          {property.label}
-                        </option>
-                      ))}
-                    </select>
+                    <div className="helper" style={{ marginBottom: 6 }}>
+                      Current:{" "}
+                      {hubspotSettings.property_mappings[localField]
+                        ? propertyLabelByName[hubspotSettings.property_mappings[localField]] ||
+                          hubspotSettings.property_mappings[localField]
+                        : "Not mapped"}
+                    </div>
+                    <div className="inline-actions" style={{ gap: 8 }}>
+                      <input
+                        type="search"
+                        value={propertySearchByField[localField] || ""}
+                        onChange={(e) =>
+                          setPropertySearchByField((prev) => ({
+                            ...prev,
+                            [localField]: e.target.value,
+                          }))
+                        }
+                        placeholder="Search HubSpot property..."
+                      />
+                      <button
+                        className="button ghost"
+                        type="button"
+                        onClick={() => setPropertyMapping(localField, "")}
+                      >
+                        Clear
+                      </button>
+                    </div>
+                    {(propertySearchByField[localField] || "").trim() && (
+                      <div className="inline-actions" style={{ marginTop: 6 }}>
+                        {getFilteredPropertyOptions(localField).map((property) => (
+                          <button
+                            key={property.name}
+                            className="button ghost"
+                            type="button"
+                            onClick={() => {
+                              setPropertyMapping(localField, property.name);
+                              setPropertySearchByField((prev) => ({
+                                ...prev,
+                                [localField]: "",
+                              }));
+                            }}
+                            title={property.name}
+                          >
+                            {property.label}
+                          </button>
+                        ))}
+                        {getFilteredPropertyOptions(localField).length === 0 && (
+                          <span className="helper">No matching properties.</span>
+                        )}
+                      </div>
+                    )}
                   </td>
                 </tr>
               ))}
