@@ -28,14 +28,11 @@ function AppShell() {
           <NavLink to="/" end className={({ isActive }) => `side-link${isActive ? " active" : ""}`}>
             Home
           </NavLink>
-          <NavLink to="/quotes" end className={({ isActive }) => `side-link${isActive ? " active" : ""}`}>
-            Quotes
-          </NavLink>
           <NavLink to="/tasks" end className={({ isActive }) => `side-link${isActive ? " active" : ""}`}>
             Tasks
           </NavLink>
-          <NavLink to="/quotes/new" className={({ isActive }) => `side-link${isActive ? " active" : ""}`}>
-            New Quote
+          <NavLink to="/quotes" end className={({ isActive }) => `side-link${isActive ? " active" : ""}`}>
+            Quotes
           </NavLink>
           <NavLink
             to="/implementations"

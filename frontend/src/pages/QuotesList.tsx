@@ -169,7 +169,12 @@ export default function QuotesList() {
 
   return (
     <section className="section">
-      <h2>Quotes</h2>
+      <div className="inline-actions" style={{ justifyContent: "space-between", marginBottom: 12 }}>
+        <h2 style={{ margin: 0 }}>Quotes</h2>
+        <Link className="button" to="/quotes/new">
+          New Quote
+        </Link>
+      </div>
       {error && <div className="notice">{error}</div>}
       <div ref={filtersRef} className="inline-actions" style={{ marginBottom: 12 }}>
         <MultiSelectDropdown
