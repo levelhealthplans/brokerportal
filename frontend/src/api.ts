@@ -192,6 +192,7 @@ export type UserCreate = {
   job_title: string;
   organization: string;
   role: string;
+  password?: string;
 };
 
 export type AccessParams = {

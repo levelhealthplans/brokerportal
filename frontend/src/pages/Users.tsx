@@ -26,17 +26,30 @@ export default function Users() {
     first_name: "",
     last_name: "",
     email: "",
+    password: "",
+    confirm_password: "",
     phone: "",
     job_title: "",
     organization: "",
     role: "broker",
   });
   const [editingId, setEditingId] = useState<string | null>(null);
-  const [editDraft, setEditDraft] = useState(form);
+  const [editDraft, setEditDraft] = useState({
+    first_name: "",
+    last_name: "",
+    email: "",
+    phone: "",
+    job_title: "",
+    organization: "",
+    role: "broker",
+  });
   const [assignUserId, setAssignUserId] = useState<string | null>(null);
   const [selectedQuoteIds, setSelectedQuoteIds] = useState<string[]>([]);
   const [selectedTaskIds, setSelectedTaskIds] = useState<string[]>([]);
   const [createModalOpen, setCreateModalOpen] = useState(false);
+  const [passwordUser, setPasswordUser] = useState<User | null>(null);
+  const [passwordDraft, setPasswordDraft] = useState("");
+  const [passwordConfirm, setPasswordConfirm] = useState("");
   const statusMessageFading = useAutoDismissMessage(statusMessage, setStatusMessage, 5000, 500);
 
   const load = () => {
@@ -80,11 +93,25 @@ export default function Users() {
     event.preventDefault();
     setError(null);
     setStatusMessage(null);
+    const password = form.password.trim();
+    if (!password) {
+      setError("Password is required.");
+      return;
+    }
+    if (password.length < 8) {
+      setError("Password must be at least 8 characters.");
+      return;
+    }
+    if (password !== form.confirm_password) {
+      setError("Password confirmation does not match.");
+      return;
+    }
     try {
       await createUser({
         first_name: form.first_name.trim(),
         last_name: form.last_name.trim(),
         email: form.email.trim().toLowerCase(),
+        password,
         phone: form.phone.trim(),
         job_title: form.job_title.trim(),
         organization: form.organization.trim(),
@@ -94,6 +121,8 @@ export default function Users() {
         first_name: "",
         last_name: "",
         email: "",
+        password: "",
+        confirm_password: "",
         phone: "",
         job_title: "",
         organization: "",
@@ -102,6 +131,46 @@ export default function Users() {
       setCreateModalOpen(false);
       setStatusMessage("User created.");
       load();
+    } catch (err: any) {
+      setError(err.message);
+    }
+  };
+
+  const openPasswordModal = (user: User) => {
+    setPasswordUser(user);
+    setPasswordDraft("");
+    setPasswordConfirm("");
+    setError(null);
+    setStatusMessage(null);
+  };
+
+  const closePasswordModal = () => {
+    setPasswordUser(null);
+    setPasswordDraft("");
+    setPasswordConfirm("");
+  };
+
+  const handlePasswordSave = async () => {
+    if (!passwordUser) return;
+    setError(null);
+    setStatusMessage(null);
+    const password = passwordDraft.trim();
+    if (!password) {
+      setError("Password is required.");
+      return;
+    }
+    if (password.length < 8) {
+      setError("Password must be at least 8 characters.");
+      return;
+    }
+    if (password !== passwordConfirm) {
+      setError("Password confirmation does not match.");
+      return;
+    }
+    try {
+      await updateUser(passwordUser.id, { password });
+      closePasswordModal();
+      setStatusMessage(`Password updated for ${passwordUser.first_name} ${passwordUser.last_name}.`);
     } catch (err: any) {
       setError(err.message);
     }
@@ -234,6 +303,24 @@ export default function Users() {
                 />
               </label>
               <label>
+                Password
+                <input
+                  required
+                  type="password"
+                  value={form.password}
+                  onChange={(e) => handleChange("password", e.target.value)}
+                />
+              </label>
+              <label>
+                Confirm Password
+                <input
+                  required
+                  type="password"
+                  value={form.confirm_password}
+                  onChange={(e) => handleChange("confirm_password", e.target.value)}
+                />
+              </label>
+              <label>
                 Phone
                 <input value={form.phone} onChange={(e) => handleChange("phone", e.target.value)} />
               </label>
@@ -258,6 +345,55 @@ export default function Users() {
                   Create User
                 </button>
                 <button className="button ghost" type="button" onClick={() => setCreateModalOpen(false)}>
+                  Cancel
+                </button>
+              </div>
+            </form>
+          </div>
+        </div>
+      )}
+
+      {passwordUser && (
+        <div className="modal-backdrop" onClick={closePasswordModal}>
+          <div className="modal" onClick={(event) => event.stopPropagation()}>
+            <div className="modal-header">
+              <h3 style={{ margin: 0 }}>
+                Set Password: {passwordUser.first_name} {passwordUser.last_name}
+              </h3>
+              <button className="button ghost" type="button" onClick={closePasswordModal}>
+                Close
+              </button>
+            </div>
+            <form
+              className="form-grid"
+              onSubmit={(event) => {
+                event.preventDefault();
+                handlePasswordSave();
+              }}
+            >
+              <label>
+                New Password
+                <input
+                  required
+                  type="password"
+                  value={passwordDraft}
+                  onChange={(e) => setPasswordDraft(e.target.value)}
+                />
+              </label>
+              <label>
+                Confirm Password
+                <input
+                  required
+                  type="password"
+                  value={passwordConfirm}
+                  onChange={(e) => setPasswordConfirm(e.target.value)}
+                />
+              </label>
+              <div className="inline-actions">
+                <button className="button" type="submit">
+                  Save Password
+                </button>
+                <button className="button ghost" type="button" onClick={closePasswordModal}>
                   Cancel
                 </button>
               </div>
@@ -349,6 +485,9 @@ export default function Users() {
                     <div className="inline-actions">
                       <button className="button ghost" type="button" onClick={() => startEdit(user)}>
                         Edit
+                      </button>
+                      <button className="button ghost" type="button" onClick={() => openPasswordModal(user)}>
+                        Password
                       </button>
                       <button className="button secondary" type="button" onClick={() => toggleAssign(user)}>
                         {assignUserId === user.id ? "Close" : "Assign"}

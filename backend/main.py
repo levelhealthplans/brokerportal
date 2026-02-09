@@ -95,6 +95,8 @@ TASK_STATE_CANONICAL = {
     "complete": "Complete",
     "done": "Complete",
 }
+ALLOWED_USER_ROLES = {"admin", "broker", "sponsor"}
+PASSWORD_MIN_LENGTH = 8
 
 app = FastAPI(title="Level Health Broker Portal API")
 
@@ -1159,6 +1161,40 @@ def verify_password(password: str, salt: Optional[str], expected_hash: Optional[
     return secrets.compare_digest(actual_hash, expected_hash)
 
 
+def normalize_user_email(email: Optional[str]) -> str:
+    value = (email or "").strip().lower()
+    if not value or "@" not in value:
+        raise HTTPException(status_code=400, detail="A valid email is required")
+    return value
+
+
+def normalize_user_role(role: Optional[str]) -> str:
+    value = (role or "").strip().lower()
+    if value not in ALLOWED_USER_ROLES:
+        allowed = ", ".join(sorted(ALLOWED_USER_ROLES))
+        raise HTTPException(status_code=400, detail=f"Role must be one of: {allowed}")
+    return value
+
+
+def require_valid_password(password: Optional[str], *, required: bool) -> Optional[str]:
+    value = (password or "").strip()
+    if not value:
+        if required:
+            raise HTTPException(status_code=400, detail="Password is required")
+        return None
+    if len(value) < PASSWORD_MIN_LENGTH:
+        raise HTTPException(
+            status_code=400,
+            detail=f"Password must be at least {PASSWORD_MIN_LENGTH} characters",
+        )
+    return value
+
+
+def revoke_user_sessions(conn: sqlite3.Connection, user_id: str) -> None:
+    cur = conn.cursor()
+    cur.execute("DELETE FROM AuthSession WHERE user_id = ?", (user_id,))
+
+
 def send_resend_magic_link(to_email: str, link: str) -> bool:
     api_key = os.getenv("RESEND_API_KEY", "").strip()
     from_email = os.getenv("RESEND_FROM_EMAIL", "").strip()
@@ -1345,6 +1381,103 @@ def normalize_zip(value: str) -> Optional[str]:
     if len(digits) != 5:
         return None
     return digits
+
+
+def resolve_zip_header(headers: List[str]) -> Optional[str]:
+    aliases = ["zip", "zipcode", "zip code", "postal code"]
+    header_map = {h.lower().replace(" ", ""): h for h in headers}
+    for alias in aliases:
+        key = alias.lower().replace(" ", "")
+        if key in header_map:
+            return header_map[key]
+    return None
+
+
+def compute_network_assignment(
+    rows: List[Dict[str, Any]],
+    zip_header: str,
+    mapping: Dict[str, str],
+    default_network: str,
+    coverage_threshold: float,
+) -> Dict[str, Any]:
+    member_assignments: List[Dict[str, Any]] = []
+    network_counts: Dict[str, int] = {}
+    invalid_rows: List[Dict[str, Any]] = []
+
+    for idx, row in enumerate(rows, start=2):
+        if all((str(value).strip() == "" for value in row.values())):
+            continue
+        raw_zip = str(row.get(zip_header, "")).strip()
+        normalized = normalize_zip(raw_zip)
+        if not normalized:
+            invalid_rows.append({"row": idx, "zip": raw_zip, "error": "Invalid ZIP"})
+            continue
+        network = mapping.get(normalized, default_network)
+        matched = normalized in mapping
+        network_counts[network] = network_counts.get(network, 0) + 1
+        member_assignments.append(
+            {
+                "row": idx,
+                "zip": normalized,
+                "assigned_network": network,
+                "matched": matched,
+            }
+        )
+
+    total_valid = sum(network_counts.values())
+    coverage_by_network = {
+        net: (network_counts[net] / total_valid) if total_valid else 0
+        for net in sorted(network_counts.keys())
+    }
+
+    direct_counts = {
+        net: count
+        for net, count in network_counts.items()
+        if net != default_network
+    }
+    direct_sorted = sorted(
+        direct_counts.items(),
+        key=lambda item: (-item[1], item[0]),
+    )
+
+    census_incomplete = bool(invalid_rows)
+    review_required = census_incomplete
+    primary_network = default_network
+    coverage_percentage = coverage_by_network.get(default_network, 0)
+    if total_valid == 0:
+        review_required = True
+        coverage_percentage = 0
+    elif len(direct_sorted) >= 2:
+        first_net, first_count = direct_sorted[0]
+        second_net, second_count = direct_sorted[1]
+        if first_count / total_valid > 0.40 and second_count / total_valid > 0.40:
+            review_required = True
+            primary_network = "MIXED_NETWORK"
+            coverage_percentage = 0
+        elif first_count / total_valid >= coverage_threshold:
+            primary_network = first_net
+            coverage_percentage = first_count / total_valid
+    elif len(direct_sorted) == 1:
+        first_net, first_count = direct_sorted[0]
+        if first_count / total_valid >= coverage_threshold:
+            primary_network = first_net
+            coverage_percentage = first_count / total_valid
+
+    fallback_used = primary_network == default_network
+    result = {
+        "group_summary": {
+            "primary_network": primary_network,
+            "coverage_percentage": coverage_percentage,
+            "fallback_used": fallback_used,
+            "review_required": review_required,
+            "census_incomplete": census_incomplete,
+            "total_members": total_valid,
+            "invalid_rows": invalid_rows,
+        },
+        "coverage_by_network": coverage_by_network,
+        "member_assignments": member_assignments,
+    }
+    return result
 
 
 def load_network_mapping(mapping_path: Path) -> Dict[str, str]:
@@ -1634,9 +1767,9 @@ def request_magic_link(payload: AuthRequestIn) -> Dict[str, str]:
 
 @app.post("/api/auth/login", response_model=AuthVerifyOut)
 def login_with_password(payload: AuthLoginIn, response: Response) -> AuthVerifyOut:
-    email = payload.email.strip().lower()
+    email = normalize_user_email(payload.email)
     password = payload.password
-    if not email or not password:
+    if not password:
         raise HTTPException(status_code=400, detail="Email and password are required")
 
     with get_db() as conn:
@@ -2321,35 +2454,38 @@ def list_users(request: Request) -> List[UserOut]:
 def create_user(payload: UserIn, request: Request) -> UserOut:
     user_id = str(uuid.uuid4())
     now = now_iso()
-    raw_password = (payload.password or "").strip() or DEFAULT_USER_PASSWORD
-    if not raw_password:
-        raise HTTPException(status_code=400, detail="Password is required")
+    raw_password = require_valid_password(payload.password, required=True)
     password_salt, password_hash = create_password_credentials(raw_password)
+    email = normalize_user_email(payload.email)
+    role = normalize_user_role(payload.role)
     with get_db() as conn:
         require_session_role(conn, request, {"admin"})
         cur = conn.cursor()
-        cur.execute(
-            """
-            INSERT INTO User (
-                id, first_name, last_name, email, phone, job_title, organization, role,
-                password_salt, password_hash, created_at, updated_at
-            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-            """,
-            (
-                user_id,
-                payload.first_name.strip(),
-                payload.last_name.strip(),
-                payload.email.strip().lower(),
-                payload.phone.strip(),
-                payload.job_title.strip(),
-                payload.organization.strip(),
-                payload.role.strip(),
-                password_salt,
-                password_hash,
-                now,
-                now,
-            ),
-        )
+        try:
+            cur.execute(
+                """
+                INSERT INTO User (
+                    id, first_name, last_name, email, phone, job_title, organization, role,
+                    password_salt, password_hash, created_at, updated_at
+                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                """,
+                (
+                    user_id,
+                    payload.first_name.strip(),
+                    payload.last_name.strip(),
+                    email,
+                    payload.phone.strip(),
+                    payload.job_title.strip(),
+                    payload.organization.strip(),
+                    role,
+                    password_salt,
+                    password_hash,
+                    now,
+                    now,
+                ),
+            )
+        except sqlite3.IntegrityError:
+            raise HTTPException(status_code=400, detail="Email already exists")
         conn.commit()
         cur.execute("SELECT * FROM User WHERE id = ?", (user_id,))
         row = cur.fetchone()
@@ -2363,40 +2499,49 @@ def update_user(user_id: str, payload: UserUpdate, request: Request) -> UserOut:
         user = fetch_user(conn, user_id)
         updates = payload.dict(exclude_unset=True)
         data = dict(user)
+        password_changed = False
         for key, value in updates.items():
             if isinstance(value, str):
                 value = value.strip()
             if key == "email" and value:
-                value = value.lower()
+                value = normalize_user_email(value)
+            if key == "role" and value:
+                value = normalize_user_role(value)
             data[key] = value
-        password_value = updates.get("password")
-        if isinstance(password_value, str) and password_value.strip():
-            password_salt, password_hash = create_password_credentials(password_value.strip())
+        if "password" in updates:
+            password_value = require_valid_password(updates.get("password"), required=True)
+            password_salt, password_hash = create_password_credentials(password_value)
             data["password_salt"] = password_salt
             data["password_hash"] = password_hash
+            password_changed = True
         data["updated_at"] = now_iso()
         cur = conn.cursor()
-        cur.execute(
-            """
-            UPDATE User
-            SET first_name = ?, last_name = ?, email = ?, phone = ?, job_title = ?, organization = ?, role = ?,
-                password_salt = ?, password_hash = ?, updated_at = ?
-            WHERE id = ?
-            """,
-            (
-                data["first_name"],
-                data["last_name"],
-                data["email"],
-                data.get("phone", ""),
-                data["job_title"],
-                data["organization"],
-                data["role"],
-                data.get("password_salt"),
-                data.get("password_hash"),
-                data["updated_at"],
-                user_id,
-            ),
-        )
+        try:
+            cur.execute(
+                """
+                UPDATE User
+                SET first_name = ?, last_name = ?, email = ?, phone = ?, job_title = ?, organization = ?, role = ?,
+                    password_salt = ?, password_hash = ?, updated_at = ?
+                WHERE id = ?
+                """,
+                (
+                    data["first_name"],
+                    data["last_name"],
+                    data["email"],
+                    data.get("phone", ""),
+                    data["job_title"],
+                    data["organization"],
+                    data["role"],
+                    data.get("password_salt"),
+                    data.get("password_hash"),
+                    data["updated_at"],
+                    user_id,
+                ),
+            )
+        except sqlite3.IntegrityError:
+            raise HTTPException(status_code=400, detail="Email already exists")
+        if password_changed:
+            revoke_user_sessions(conn, user_id)
         conn.commit()
         cur.execute("SELECT * FROM User WHERE id = ?", (user_id,))
         row = cur.fetchone()
@@ -2919,102 +3064,35 @@ def run_assignment(quote_id: str) -> AssignmentOut:
         file_path = Path(census["path"])
         headers, rows = load_census_rows(file_path)
 
-        def resolve_zip_header() -> Optional[str]:
-            aliases = ["zip", "zipcode", "zip code", "postal code"]
-            header_map = {h.lower().replace(" ", ""): h for h in headers}
-            for alias in aliases:
-                key = alias.lower().replace(" ", "")
-                if key in header_map:
-                    return header_map[key]
-            return None
-
-        zip_header = resolve_zip_header()
+        zip_header = resolve_zip_header(headers)
         if not zip_header:
             raise HTTPException(status_code=400, detail="Census file missing ZIP column")
 
-        member_assignments: List[Dict[str, Any]] = []
-        network_counts: Dict[str, int] = {}
-        invalid_rows: List[Dict[str, Any]] = []
-
-        for idx, row in enumerate(rows, start=2):
-            if all((str(value).strip() == "" for value in row.values())):
-                continue
-            raw_zip = str(row.get(zip_header, "")).strip()
-            normalized = normalize_zip(raw_zip)
-            if not normalized:
-                invalid_rows.append({"row": idx, "zip": raw_zip})
-                continue
-            network = mapping.get(normalized, DEFAULT_NETWORK)
-            matched = normalized in mapping
-            network_counts[network] = network_counts.get(network, 0) + 1
-            member_assignments.append(
-                {
-                    "row": idx,
-                    "zip": normalized,
-                    "assigned_network": network,
-                    "matched": matched,
-                }
-            )
-
-        total_valid = sum(network_counts.values())
-        coverage_by_network = {
-            net: (count / total_valid) if total_valid else 0
-            for net, count in network_counts.items()
-        }
-
-        direct_counts = {
-            net: count
-            for net, count in network_counts.items()
-            if net != DEFAULT_NETWORK
-        }
-        direct_sorted = sorted(
-            direct_counts.items(), key=lambda item: item[1], reverse=True
+        result = compute_network_assignment(
+            rows=rows,
+            zip_header=zip_header,
+            mapping=mapping,
+            default_network=DEFAULT_NETWORK,
+            coverage_threshold=threshold,
         )
-
-        review_required = False
-        primary_network = DEFAULT_NETWORK
-        coverage_percentage = coverage_by_network.get(DEFAULT_NETWORK, 0)
-        if total_valid == 0:
-            review_required = True
-            primary_network = "MIXED_NETWORK"
-            coverage_percentage = 0
-        elif len(direct_sorted) >= 2:
-            first_net, first_count = direct_sorted[0]
-            second_net, second_count = direct_sorted[1]
-            if first_count / total_valid >= 0.40 and second_count / total_valid >= 0.40:
-                review_required = True
-                primary_network = "MIXED_NETWORK"
-                coverage_percentage = 0
-            elif first_count / total_valid >= threshold:
-                primary_network = first_net
-                coverage_percentage = first_count / total_valid
-        elif len(direct_sorted) == 1:
-            first_net, first_count = direct_sorted[0]
-            if first_count / total_valid >= threshold:
-                primary_network = first_net
-                coverage_percentage = first_count / total_valid
-
-        fallback_used = primary_network == DEFAULT_NETWORK
-
-        result = {
-            "group_summary": {
-                "primary_network": primary_network,
-                "coverage_percentage": coverage_percentage,
-                "fallback_used": fallback_used,
-                "review_required": review_required,
-                "total_members": total_valid,
-                "invalid_rows": invalid_rows,
-            },
-            "coverage_by_network": coverage_by_network,
-            "member_assignments": member_assignments,
-        }
+        group_summary = result["group_summary"]
+        primary_network = group_summary["primary_network"]
+        coverage_percentage = group_summary["coverage_percentage"]
+        fallback_used = group_summary["fallback_used"]
+        review_required = group_summary["review_required"]
+        census_incomplete = group_summary.get("census_incomplete", False)
 
         run_id = str(uuid.uuid4())
         created_at = now_iso()
         recommendation = primary_network
         confidence = round(coverage_percentage, 2)
         if review_required:
-            rationale = "Mixed network coverage. Manual review required."
+            if primary_network == "MIXED_NETWORK":
+                rationale = "Mixed network coverage. Manual review required."
+            elif census_incomplete:
+                rationale = "Invalid ZIP values were excluded; census marked incomplete."
+            else:
+                rationale = "Assignment requires manual review."
         elif fallback_used:
             rationale = "Direct contract coverage below threshold; default network applied."
         else:
