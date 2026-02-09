@@ -1820,8 +1820,8 @@ def normalize_mapping_dict(value: Optional[Dict[str, Any]]) -> Dict[str, str]:
 def default_hubspot_settings() -> Dict[str, Any]:
     return {
         "enabled": False,
-        "portal_id": (os.getenv("HUBSPOT_PORTAL_ID", "98238573") or "98238573").strip(),
-        "pipeline_id": (os.getenv("HUBSPOT_PIPELINE_ID", "") or "").strip(),
+        "portal_id": (os.getenv("HUBSPOT_PORTAL_ID", "7106327") or "7106327").strip(),
+        "pipeline_id": (os.getenv("HUBSPOT_PIPELINE_ID", "98238573") or "98238573").strip(),
         "default_stage_id": (os.getenv("HUBSPOT_DEFAULT_STAGE_ID", "") or "").strip(),
         "sync_quote_to_hubspot": True,
         "sync_hubspot_to_quote": True,

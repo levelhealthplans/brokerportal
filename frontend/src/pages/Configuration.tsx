@@ -29,8 +29,8 @@ import { formatNetworkLabel } from "../utils/formatNetwork";
 
 const EMPTY_HUBSPOT_SETTINGS: HubSpotSettings = {
   enabled: false,
-  portal_id: "98238573",
-  pipeline_id: "",
+  portal_id: "7106327",
+  pipeline_id: "98238573",
   default_stage_id: "",
   sync_quote_to_hubspot: true,
   sync_hubspot_to_quote: true,
@@ -438,7 +438,7 @@ export default function Configuration() {
               onChange={(e) =>
                 setHubspotSettings((prev) => ({ ...prev, portal_id: e.target.value }))
               }
-              placeholder="98238573"
+              placeholder="7106327"
             />
           </label>
           <label style={{ minWidth: 280 }}>
@@ -459,7 +459,7 @@ export default function Configuration() {
               onChange={(e) =>
                 setHubspotSettings((prev) => ({ ...prev, pipeline_id: e.target.value }))
               }
-              placeholder="default"
+              placeholder="98238573"
             />
           </label>
           <label style={{ minWidth: 260 }}>
