@@ -203,18 +203,38 @@ def build_access_filter(
     if not role or role == "admin":
         return "", []
     if role == "broker":
-        domain = email_domain(email)
+        normalized_email = (email or "").strip().lower()
+        domain = email_domain(normalized_email)
         org = fetch_org_by_domain(conn, "broker", domain)
-        broker_org = org["name"] if org else broker_org_from_email(email)
-        if not broker_org:
-            return "", []
-        return "WHERE broker_org = ?", [broker_org]
+        broker_org = org["name"] if org else broker_org_from_email(normalized_email)
+
+        user_id = None
+        if normalized_email:
+            cur = conn.cursor()
+            cur.execute("SELECT id, organization FROM User WHERE email = ?", (normalized_email,))
+            user = cur.fetchone()
+            if user:
+                user_id = (user["id"] or "").strip() or None
+                if not broker_org:
+                    broker_org = (user["organization"] or "").strip() or None
+
+        clauses: List[str] = []
+        params: List[Any] = []
+        if broker_org:
+            clauses.append("broker_org = ?")
+            params.append(broker_org)
+        if user_id:
+            clauses.append("assigned_user_id = ?")
+            params.append(user_id)
+        if not clauses:
+            return "WHERE 1 = 0", []
+        return f"WHERE ({' OR '.join(clauses)})", params
     if role == "sponsor":
-        domain = email_domain(email)
+        domain = email_domain((email or "").strip().lower())
         if not domain:
-            return "", []
+            return "WHERE 1 = 0", []
         return "WHERE sponsor_domain = ?", [domain]
-    return "", []
+    return "WHERE 1 = 0", []
 
 
 def init_db() -> None:
