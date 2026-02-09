@@ -2227,7 +2227,8 @@ def build_hubspot_ticket_properties(quote: Dict[str, Any], settings: Dict[str, A
     }
     if settings.get("pipeline_id"):
         properties["hs_pipeline"] = settings["pipeline_id"]
-    if stage_id:
+    # HubSpot stage IDs are numeric strings; ignore human labels like "Draft".
+    if stage_id and stage_id.isdigit():
         properties["hs_pipeline_stage"] = stage_id
 
     property_mappings = settings.get("property_mappings") or {}
@@ -2237,6 +2238,86 @@ def build_hubspot_ticket_properties(quote: Dict[str, Any], settings: Dict[str, A
         if local_key in quote:
             properties[hubspot_property] = to_hubspot_property_value(quote.get(local_key))
     return {key: value for key, value in properties.items() if value is not None}
+
+
+def extract_hubspot_invalid_properties(error_message: str) -> List[Dict[str, Any]]:
+    message = (error_message or "").strip()
+    marker = "Property values were not valid:"
+    marker_idx = message.find(marker)
+    if marker_idx < 0:
+        return []
+    payload = message[marker_idx + len(marker) :].strip()
+    start_idx = payload.find("[")
+    end_idx = payload.rfind("]")
+    if start_idx < 0 or end_idx < 0 or end_idx <= start_idx:
+        return []
+    json_payload = payload[start_idx : end_idx + 1]
+    try:
+        parsed = json.loads(json_payload)
+        if isinstance(parsed, list):
+            return [row for row in parsed if isinstance(row, dict)]
+    except Exception:
+        return []
+    return []
+
+
+def remove_invalid_ticket_properties(
+    properties: Dict[str, str], invalid_rows: List[Dict[str, Any]]
+) -> tuple[Dict[str, str], List[str]]:
+    next_properties = dict(properties)
+    removed_names: List[str] = []
+    for row in invalid_rows:
+        name = str(row.get("name") or "").strip()
+        if not name:
+            continue
+        if name in next_properties:
+            next_properties.pop(name, None)
+            if name not in removed_names:
+                removed_names.append(name)
+    return next_properties, removed_names
+
+
+def upsert_hubspot_ticket_with_recovery(
+    token: str,
+    *,
+    ticket_id: Optional[str],
+    properties: Dict[str, str],
+) -> tuple[Dict[str, Any], Optional[str]]:
+    path = "/crm/v3/objects/tickets" if not ticket_id else f"/crm/v3/objects/tickets/{ticket_id}"
+    method = "POST" if not ticket_id else "PATCH"
+    try:
+        result = hubspot_api_request(
+            token,
+            method,
+            path,
+            body={"properties": properties},
+        )
+        return result, None
+    except Exception as exc:
+        message = hubspot_exception_message(exc)
+        invalid_rows = extract_hubspot_invalid_properties(message)
+        if not invalid_rows:
+            raise
+        retry_properties, removed_names = remove_invalid_ticket_properties(properties, invalid_rows)
+        if not removed_names:
+            raise
+        result = hubspot_api_request(
+            token,
+            method,
+            path,
+            body={"properties": retry_properties},
+        )
+        warning = f"Dropped invalid ticket properties: {', '.join(removed_names)}"
+        return result, warning
+
+
+def combine_warnings(*warnings: Optional[str]) -> Optional[str]:
+    merged: List[str] = []
+    for warning in warnings:
+        text = (warning or "").strip()
+        if text and text not in merged:
+            merged.append(text)
+    return " | ".join(merged) if merged else None
 
 
 def find_user_by_id(conn: sqlite3.Connection, user_id: Optional[str]) -> Optional[sqlite3.Row]:
@@ -2605,11 +2686,10 @@ def sync_quote_to_hubspot(conn: sqlite3.Connection, quote_id: str, *, create_if_
 
     try:
         if ticket_id:
-            hubspot_api_request(
+            _, property_warning = upsert_hubspot_ticket_with_recovery(
                 token,
-                "PATCH",
-                f"/crm/v3/objects/tickets/{ticket_id}",
-                body={"properties": properties},
+                ticket_id=ticket_id,
+                properties=properties,
             )
             association_warning = sync_hubspot_ticket_associations(conn, token, quote, ticket_id)
             ticket_url = build_hubspot_ticket_url(settings["portal_id"], ticket_id)
@@ -2618,7 +2698,7 @@ def sync_quote_to_hubspot(conn: sqlite3.Connection, quote_id: str, *, create_if_
                 quote_id,
                 ticket_id=ticket_id,
                 ticket_url=ticket_url,
-                sync_error=association_warning,
+                sync_error=combine_warnings(property_warning, association_warning),
             )
             return
 
@@ -2630,11 +2710,10 @@ def sync_quote_to_hubspot(conn: sqlite3.Connection, quote_id: str, *, create_if_
             )
             return
 
-        created = hubspot_api_request(
+        created, property_warning = upsert_hubspot_ticket_with_recovery(
             token,
-            "POST",
-            "/crm/v3/objects/tickets",
-            body={"properties": properties},
+            ticket_id=None,
+            properties=properties,
         )
         new_ticket_id = str(created.get("id") or "").strip()
         association_warning = None
@@ -2646,7 +2725,7 @@ def sync_quote_to_hubspot(conn: sqlite3.Connection, quote_id: str, *, create_if_
             quote_id,
             ticket_id=new_ticket_id or None,
             ticket_url=ticket_url,
-            sync_error=association_warning,
+            sync_error=combine_warnings(property_warning, association_warning),
         )
     except Exception as exc:
         detail = str(exc)
