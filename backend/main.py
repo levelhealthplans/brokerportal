@@ -4,6 +4,7 @@ import csv
 import hashlib
 import json
 import os
+import re
 import secrets
 import shutil
 import sqlite3
@@ -106,6 +107,17 @@ HUBSPOT_API_BASE = "https://api.hubapi.com"
 HUBSPOT_OAUTH_AUTHORIZE_URL = "https://app.hubspot.com/oauth/authorize"
 HUBSPOT_OAUTH_TOKEN_URL = "https://api.hubapi.com/oauth/v1/token"
 HUBSPOT_OAUTH_STATE_MINUTES = 15
+HUBSPOT_TICKET_RESERVED_PROPERTIES = {
+    "subject",
+    "content",
+    "hs_pipeline",
+    "hs_pipeline_stage",
+    "hs_ticket_id",
+}
+HUBSPOT_TICKET_READ_ONLY_PREFIXES = (
+    "hs_all_associated_",
+    "hs_primary_",
+)
 HUBSPOT_OAUTH_DEFAULT_SCOPES = (
     "oauth tickets "
     "crm.objects.contacts.read crm.objects.contacts.write "
@@ -1882,6 +1894,26 @@ def normalize_mapping_dict(value: Optional[Dict[str, Any]]) -> Dict[str, str]:
     return mapping
 
 
+def is_blocked_hubspot_ticket_property(name: Optional[str]) -> bool:
+    candidate = str(name or "").strip()
+    if not candidate:
+        return True
+    lowered = candidate.lower()
+    if lowered in HUBSPOT_TICKET_RESERVED_PROPERTIES:
+        return True
+    return any(lowered.startswith(prefix) for prefix in HUBSPOT_TICKET_READ_ONLY_PREFIXES)
+
+
+def normalize_ticket_property_mappings(value: Optional[Dict[str, Any]]) -> Dict[str, str]:
+    mapping = normalize_mapping_dict(value)
+    cleaned: Dict[str, str] = {}
+    for local_key, hubspot_property in mapping.items():
+        if is_blocked_hubspot_ticket_property(hubspot_property):
+            continue
+        cleaned[local_key] = hubspot_property
+    return cleaned
+
+
 def default_hubspot_settings() -> Dict[str, Any]:
     return {
         "enabled": False,
@@ -1920,7 +1952,7 @@ def serialize_hubspot_settings_for_storage(settings: Dict[str, Any]) -> Dict[str
         "sync_hubspot_to_quote": bool(settings.get("sync_hubspot_to_quote", True)),
         "ticket_subject_template": str(settings.get("ticket_subject_template") or "").strip(),
         "ticket_content_template": str(settings.get("ticket_content_template") or "").strip(),
-        "property_mappings": normalize_mapping_dict(settings.get("property_mappings")),
+        "property_mappings": normalize_ticket_property_mappings(settings.get("property_mappings")),
         "quote_status_to_stage": normalize_mapping_dict(settings.get("quote_status_to_stage")),
         "stage_to_quote_status": normalize_mapping_dict(settings.get("stage_to_quote_status")),
         "oauth_redirect_uri": str(settings.get("oauth_redirect_uri") or "").strip(),
@@ -1981,7 +2013,7 @@ def read_hubspot_settings(*, include_token: bool = False) -> Dict[str, Any]:
             raw.get("ticket_content_template") or defaults["ticket_content_template"]
         ).strip()
         or defaults["ticket_content_template"],
-        "property_mappings": normalize_mapping_dict(
+        "property_mappings": normalize_ticket_property_mappings(
             raw.get("property_mappings") or defaults["property_mappings"]
         ),
         "quote_status_to_stage": normalize_mapping_dict(raw.get("quote_status_to_stage")),
@@ -2027,7 +2059,7 @@ def write_hubspot_settings(
             payload.ticket_content_template or current["ticket_content_template"]
         ).strip()
         or current["ticket_content_template"],
-        "property_mappings": normalize_mapping_dict(
+        "property_mappings": normalize_ticket_property_mappings(
             payload.property_mappings
             if payload.property_mappings is not None
             else current["property_mappings"]
@@ -2231,9 +2263,14 @@ def build_hubspot_ticket_properties(quote: Dict[str, Any], settings: Dict[str, A
     if stage_id and stage_id.isdigit():
         properties["hs_pipeline_stage"] = stage_id
 
-    property_mappings = settings.get("property_mappings") or {}
+    property_mappings = normalize_ticket_property_mappings(settings.get("property_mappings") or {})
     for local_key, hubspot_property in property_mappings.items():
         if not hubspot_property:
+            continue
+        if is_blocked_hubspot_ticket_property(hubspot_property):
+            continue
+        if hubspot_property in properties:
+            # Keep reserved/computed values sourced from integration settings.
             continue
         if local_key in quote:
             properties[hubspot_property] = to_hubspot_property_value(quote.get(local_key))
@@ -2244,21 +2281,28 @@ def extract_hubspot_invalid_properties(error_message: str) -> List[Dict[str, Any
     message = (error_message or "").strip()
     marker = "Property values were not valid:"
     marker_idx = message.find(marker)
-    if marker_idx < 0:
-        return []
-    payload = message[marker_idx + len(marker) :].strip()
+    payload = message[marker_idx + len(marker) :].strip() if marker_idx >= 0 else message
+    rows: List[Dict[str, Any]] = []
     start_idx = payload.find("[")
     end_idx = payload.rfind("]")
-    if start_idx < 0 or end_idx < 0 or end_idx <= start_idx:
-        return []
-    json_payload = payload[start_idx : end_idx + 1]
-    try:
-        parsed = json.loads(json_payload)
-        if isinstance(parsed, list):
-            return [row for row in parsed if isinstance(row, dict)]
-    except Exception:
-        return []
-    return []
+    if start_idx >= 0 and end_idx > start_idx:
+        json_payload = payload[start_idx : end_idx + 1]
+        try:
+            parsed = json.loads(json_payload)
+            if isinstance(parsed, list):
+                rows = [row for row in parsed if isinstance(row, dict)]
+        except Exception:
+            rows = []
+    if rows:
+        return rows
+    # Fallback for non-JSON payloads: pull property names from known fragments.
+    names = [name.strip() for name in re.findall(r'"name":"([^"]+)"', payload) if name.strip()]
+    deduped: List[Dict[str, Any]] = []
+    for name in names:
+        if any(row.get("name") == name for row in deduped):
+            continue
+        deduped.append({"name": name})
+    return deduped
 
 
 def remove_invalid_ticket_properties(
@@ -2285,30 +2329,43 @@ def upsert_hubspot_ticket_with_recovery(
 ) -> tuple[Dict[str, Any], Optional[str]]:
     path = "/crm/v3/objects/tickets" if not ticket_id else f"/crm/v3/objects/tickets/{ticket_id}"
     method = "POST" if not ticket_id else "PATCH"
-    try:
-        result = hubspot_api_request(
-            token,
-            method,
-            path,
-            body={"properties": properties},
-        )
-        return result, None
-    except Exception as exc:
-        message = hubspot_exception_message(exc)
-        invalid_rows = extract_hubspot_invalid_properties(message)
-        if not invalid_rows:
-            raise
-        retry_properties, removed_names = remove_invalid_ticket_properties(properties, invalid_rows)
-        if not removed_names:
-            raise
-        result = hubspot_api_request(
-            token,
-            method,
-            path,
-            body={"properties": retry_properties},
-        )
-        warning = f"Dropped invalid ticket properties: {', '.join(removed_names)}"
+    attempt_properties = dict(properties)
+    removed_all: List[str] = []
+    for _ in range(3):
+        try:
+            result = hubspot_api_request(
+                token,
+                method,
+                path,
+                body={"properties": attempt_properties},
+            )
+            if removed_all:
+                warning = f"Dropped invalid ticket properties: {', '.join(removed_all)}"
+                return result, warning
+            return result, None
+        except Exception as exc:
+            message = hubspot_exception_message(exc)
+            invalid_rows = extract_hubspot_invalid_properties(message)
+            if not invalid_rows:
+                raise
+            next_properties, removed_names = remove_invalid_ticket_properties(attempt_properties, invalid_rows)
+            if not removed_names:
+                raise
+            for name in removed_names:
+                if name not in removed_all:
+                    removed_all.append(name)
+            attempt_properties = next_properties
+
+    result = hubspot_api_request(
+        token,
+        method,
+        path,
+        body={"properties": attempt_properties},
+    )
+    if removed_all:
+        warning = f"Dropped invalid ticket properties: {', '.join(removed_all)}"
         return result, warning
+    return result, None
 
 
 def combine_warnings(*warnings: Optional[str]) -> Optional[str]:
@@ -2767,8 +2824,16 @@ def list_hubspot_ticket_properties(settings: Dict[str, Any]) -> List[Dict[str, s
     for item in raw.get("results", []):
         name = str(item.get("name") or "").strip()
         label = str(item.get("label") or name).strip()
-        if name:
-            properties.append({"name": name, "label": label or name})
+        if not name:
+            continue
+        if is_blocked_hubspot_ticket_property(name):
+            continue
+        metadata = item.get("modificationMetadata") or {}
+        if bool(metadata.get("readOnlyValue")) or bool(metadata.get("readOnlyDefinition")):
+            continue
+        if bool(item.get("calculated")):
+            continue
+        properties.append({"name": name, "label": label or name})
     properties.sort(key=lambda row: row["label"].lower())
     return properties
 
