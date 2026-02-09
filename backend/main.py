@@ -108,6 +108,7 @@ HUBSPOT_OAUTH_STATE_MINUTES = 15
 HUBSPOT_OAUTH_DEFAULT_SCOPES = (
     "oauth tickets "
     "crm.objects.contacts.read crm.objects.contacts.write "
+    "crm.objects.companies.read crm.objects.companies.write "
     "crm.objects.deals.read crm.objects.deals.write "
     "crm.schemas.contacts.read crm.schemas.contacts.write "
     "crm.schemas.deals.read crm.schemas.deals.write"
@@ -2216,6 +2217,305 @@ def build_hubspot_ticket_properties(quote: Dict[str, Any], settings: Dict[str, A
     return {key: value for key, value in properties.items() if value is not None}
 
 
+def find_user_by_id(conn: sqlite3.Connection, user_id: Optional[str]) -> Optional[sqlite3.Row]:
+    candidate = (user_id or "").strip()
+    if not candidate:
+        return None
+    cur = conn.cursor()
+    cur.execute("SELECT * FROM User WHERE id = ?", (candidate,))
+    return cur.fetchone()
+
+
+def find_organization_domain(conn: sqlite3.Connection, organization_name: Optional[str]) -> Optional[str]:
+    name = (organization_name or "").strip().lower()
+    if not name:
+        return None
+    cur = conn.cursor()
+    cur.execute(
+        """
+        SELECT domain
+        FROM Organization
+        WHERE lower(trim(name)) = ? OR lower(trim(domain)) = ?
+        ORDER BY created_at DESC
+        LIMIT 1
+        """,
+        (name, name),
+    )
+    row = cur.fetchone()
+    domain = (row["domain"] or "").strip().lower() if row else ""
+    return domain or None
+
+
+def hubspot_search_object_id(
+    token: str,
+    object_type: str,
+    property_name: str,
+    value: str,
+    *,
+    properties: Optional[List[str]] = None,
+) -> Optional[str]:
+    candidate = (value or "").strip()
+    if not candidate:
+        return None
+    payload: Dict[str, Any] = {
+        "filterGroups": [
+            {
+                "filters": [
+                    {
+                        "propertyName": property_name,
+                        "operator": "EQ",
+                        "value": candidate,
+                    }
+                ]
+            }
+        ],
+        "limit": 1,
+    }
+    if properties:
+        payload["properties"] = properties
+    result = hubspot_api_request(
+        token,
+        "POST",
+        f"/crm/v3/objects/{object_type}/search",
+        body=payload,
+    )
+    rows = result.get("results") or []
+    if not rows:
+        return None
+    first = rows[0] or {}
+    object_id = str(first.get("id") or "").strip()
+    return object_id or None
+
+
+def hubspot_exception_message(exc: Exception) -> str:
+    if isinstance(exc, HTTPException):
+        return str(exc.detail)
+    return str(exc)
+
+
+def is_hubspot_conflict_error(exc: Exception) -> bool:
+    message = hubspot_exception_message(exc)
+    return "(409)" in message or "409" in message
+
+
+def upsert_hubspot_contact_for_quote(
+    token: str,
+    *,
+    broker_email_value: Optional[str],
+    broker_first_name: Optional[str],
+    broker_last_name: Optional[str],
+    broker_phone: Optional[str],
+    broker_org_name: Optional[str],
+) -> Optional[str]:
+    broker_email = (broker_email_value or "").strip().lower()
+    if not broker_email:
+        return None
+    contact_id = hubspot_search_object_id(
+        token,
+        "contacts",
+        "email",
+        broker_email,
+        properties=["email", "firstname", "lastname", "phone", "company"],
+    )
+    properties = {
+        "email": broker_email,
+        "firstname": (broker_first_name or "").strip(),
+        "lastname": (broker_last_name or "").strip(),
+        "phone": (broker_phone or "").strip(),
+        "company": (broker_org_name or "").strip(),
+    }
+    properties = {key: value for key, value in properties.items() if value}
+    if contact_id:
+        if properties:
+            hubspot_api_request(
+                token,
+                "PATCH",
+                f"/crm/v3/objects/contacts/{contact_id}",
+                body={"properties": properties},
+            )
+        return contact_id
+    created = hubspot_api_request(
+        token,
+        "POST",
+        "/crm/v3/objects/contacts",
+        body={"properties": properties},
+    )
+    created_id = str(created.get("id") or "").strip()
+    return created_id or None
+
+
+def upsert_hubspot_company_for_quote(
+    conn: sqlite3.Connection,
+    token: str,
+    *,
+    broker_org_name_value: Optional[str],
+    broker_email_value: Optional[str],
+) -> Optional[str]:
+    broker_org_name = (broker_org_name_value or "").strip()
+    if not broker_org_name:
+        return None
+    org_domain = (
+        find_organization_domain(conn, broker_org_name)
+        or email_domain(broker_email_value)
+        or None
+    )
+    company_id: Optional[str] = None
+    if org_domain:
+        company_id = hubspot_search_object_id(
+            token,
+            "companies",
+            "domain",
+            org_domain,
+            properties=["name", "domain"],
+        )
+    if not company_id:
+        company_id = hubspot_search_object_id(
+            token,
+            "companies",
+            "name",
+            broker_org_name,
+            properties=["name", "domain"],
+        )
+
+    properties = {"name": broker_org_name}
+    if org_domain:
+        properties["domain"] = org_domain
+    if company_id:
+        hubspot_api_request(
+            token,
+            "PATCH",
+            f"/crm/v3/objects/companies/{company_id}",
+            body={"properties": properties},
+        )
+        return company_id
+
+    created = hubspot_api_request(
+        token,
+        "POST",
+        "/crm/v3/objects/companies",
+        body={"properties": properties},
+    )
+    created_id = str(created.get("id") or "").strip()
+    return created_id or None
+
+
+def associate_hubspot_records_default(
+    token: str,
+    *,
+    from_object_type: str,
+    from_object_id: str,
+    to_object_type: str,
+    to_object_id: str,
+) -> None:
+    hubspot_api_request(
+        token,
+        "PUT",
+        f"/crm/v4/objects/{from_object_type}/{from_object_id}/associations/default/{to_object_type}/{to_object_id}",
+    )
+
+
+def sync_hubspot_ticket_associations(
+    conn: sqlite3.Connection,
+    token: str,
+    quote: Dict[str, Any],
+    ticket_id: str,
+) -> Optional[str]:
+    warnings: List[str] = []
+    broker_user = find_user_by_id(conn, quote.get("assigned_user_id"))
+    broker_email_value = (
+        (broker_user["email"] if broker_user else quote.get("broker_email"))
+        if (broker_user or quote.get("broker_email"))
+        else None
+    )
+    broker_first_name = (
+        (broker_user["first_name"] if broker_user else quote.get("broker_first_name"))
+        if (broker_user or quote.get("broker_first_name"))
+        else None
+    )
+    broker_last_name = (
+        (broker_user["last_name"] if broker_user else quote.get("broker_last_name"))
+        if (broker_user or quote.get("broker_last_name"))
+        else None
+    )
+    broker_phone = (
+        (broker_user["phone"] if broker_user else quote.get("broker_phone"))
+        if (broker_user or quote.get("broker_phone"))
+        else None
+    )
+    broker_org_name = (
+        (broker_user["organization"] if broker_user else quote.get("broker_org"))
+        if (broker_user or quote.get("broker_org"))
+        else None
+    )
+
+    contact_id: Optional[str] = None
+    try:
+        contact_id = upsert_hubspot_contact_for_quote(
+            token,
+            broker_email_value=broker_email_value,
+            broker_first_name=broker_first_name,
+            broker_last_name=broker_last_name,
+            broker_phone=broker_phone,
+            broker_org_name=broker_org_name,
+        )
+    except Exception as exc:
+        warnings.append(f"Contact sync failed: {hubspot_exception_message(exc)}")
+
+    company_id: Optional[str] = None
+    try:
+        company_id = upsert_hubspot_company_for_quote(
+            conn,
+            token,
+            broker_org_name_value=broker_org_name,
+            broker_email_value=broker_email_value,
+        )
+    except Exception as exc:
+        warnings.append(f"Company sync failed: {hubspot_exception_message(exc)}")
+
+    if contact_id:
+        try:
+            associate_hubspot_records_default(
+                token,
+                from_object_type="ticket",
+                from_object_id=ticket_id,
+                to_object_type="contact",
+                to_object_id=contact_id,
+            )
+        except Exception as exc:
+            if not is_hubspot_conflict_error(exc):
+                warnings.append(f"Ticket-contact association failed: {hubspot_exception_message(exc)}")
+    if company_id:
+        try:
+            associate_hubspot_records_default(
+                token,
+                from_object_type="ticket",
+                from_object_id=ticket_id,
+                to_object_type="company",
+                to_object_id=company_id,
+            )
+        except Exception as exc:
+            if not is_hubspot_conflict_error(exc):
+                warnings.append(f"Ticket-company association failed: {hubspot_exception_message(exc)}")
+    if contact_id and company_id:
+        try:
+            associate_hubspot_records_default(
+                token,
+                from_object_type="contact",
+                from_object_id=contact_id,
+                to_object_type="company",
+                to_object_id=company_id,
+            )
+        except Exception as exc:
+            if not is_hubspot_conflict_error(exc):
+                warnings.append(f"Contact-company association failed: {hubspot_exception_message(exc)}")
+
+    deduped: List[str] = []
+    for warning in warnings:
+        if warning not in deduped:
+            deduped.append(warning)
+    return " | ".join(deduped) if deduped else None
+
+
 def update_quote_hubspot_sync_state(
     conn: sqlite3.Connection,
     quote_id: str,
@@ -2276,13 +2576,14 @@ def sync_quote_to_hubspot(conn: sqlite3.Connection, quote_id: str, *, create_if_
                 f"/crm/v3/objects/tickets/{ticket_id}",
                 body={"properties": properties},
             )
+            association_warning = sync_hubspot_ticket_associations(conn, token, quote, ticket_id)
             ticket_url = build_hubspot_ticket_url(settings["portal_id"], ticket_id)
             update_quote_hubspot_sync_state(
                 conn,
                 quote_id,
                 ticket_id=ticket_id,
                 ticket_url=ticket_url,
-                sync_error=None,
+                sync_error=association_warning,
             )
             return
 
@@ -2301,13 +2602,16 @@ def sync_quote_to_hubspot(conn: sqlite3.Connection, quote_id: str, *, create_if_
             body={"properties": properties},
         )
         new_ticket_id = str(created.get("id") or "").strip()
+        association_warning = None
+        if new_ticket_id:
+            association_warning = sync_hubspot_ticket_associations(conn, token, quote, new_ticket_id)
         ticket_url = build_hubspot_ticket_url(settings["portal_id"], new_ticket_id)
         update_quote_hubspot_sync_state(
             conn,
             quote_id,
             ticket_id=new_ticket_id or None,
             ticket_url=ticket_url,
-            sync_error=None,
+            sync_error=association_warning,
         )
     except Exception as exc:
         detail = str(exc)
