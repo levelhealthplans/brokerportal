@@ -285,6 +285,11 @@ export type HubSpotPipeline = {
   stages: { id: string; label: string }[];
 };
 
+export type HubSpotTicketProperty = {
+  name: string;
+  label: string;
+};
+
 export type HubSpotSyncResponse = {
   status: string;
   quote_id: string;
@@ -575,6 +580,10 @@ export function testHubSpotConnection() {
 
 export function getHubSpotPipelines() {
   return request<HubSpotPipeline[]>("/integrations/hubspot/pipelines");
+}
+
+export function getHubSpotTicketProperties() {
+  return request<HubSpotTicketProperty[]>("/integrations/hubspot/ticket-properties");
 }
 
 export function syncQuoteFromHubSpot(quoteId: string) {

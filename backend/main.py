@@ -1779,6 +1779,11 @@ class HubSpotPipelineOut(BaseModel):
     stages: List[HubSpotPipelineStageOut]
 
 
+class HubSpotTicketPropertyOut(BaseModel):
+    name: str
+    label: str
+
+
 def read_network_settings() -> Dict[str, Any]:
     default = {"default_network": "Cigna_PPO", "coverage_threshold": 0.90}
     if not NETWORK_SETTINGS_PATH.exists():
@@ -2151,6 +2156,24 @@ def list_hubspot_ticket_pipelines(settings: Dict[str, Any]) -> List[Dict[str, An
             }
         )
     return [pipeline for pipeline in pipelines if pipeline["id"]]
+
+
+def list_hubspot_ticket_properties(settings: Dict[str, Any]) -> List[Dict[str, str]]:
+    token = (settings.get("private_app_token") or "").strip()
+    raw = hubspot_api_request(
+        token,
+        "GET",
+        "/crm/v3/properties/tickets",
+        query={"archived": "false"},
+    )
+    properties: List[Dict[str, str]] = []
+    for item in raw.get("results", []):
+        name = str(item.get("name") or "").strip()
+        label = str(item.get("label") or name).strip()
+        if name:
+            properties.append({"name": name, "label": label or name})
+    properties.sort(key=lambda row: row["label"].lower())
+    return properties
 
 
 def sync_quote_from_hubspot(conn: sqlite3.Connection, quote_id: str) -> Dict[str, Any]:
@@ -2637,6 +2660,15 @@ def get_hubspot_ticket_pipelines(request: Request) -> List[HubSpotPipelineOut]:
     settings = read_hubspot_settings(include_token=True)
     pipelines = list_hubspot_ticket_pipelines(settings)
     return [HubSpotPipelineOut(**row) for row in pipelines]
+
+
+@app.get("/api/integrations/hubspot/ticket-properties", response_model=List[HubSpotTicketPropertyOut])
+def get_hubspot_ticket_properties(request: Request) -> List[HubSpotTicketPropertyOut]:
+    with get_db() as conn:
+        require_session_role(conn, request, {"admin"})
+    settings = read_hubspot_settings(include_token=True)
+    properties = list_hubspot_ticket_properties(settings)
+    return [HubSpotTicketPropertyOut(**row) for row in properties]
 
 
 @app.post("/api/integrations/hubspot/sync-quote/{quote_id}", response_model=HubSpotSyncResponse)

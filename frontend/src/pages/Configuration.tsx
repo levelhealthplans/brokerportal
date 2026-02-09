@@ -6,12 +6,14 @@ import {
   deleteNetworkMapping,
   deleteNetworkOption,
   getHubSpotPipelines,
+  getHubSpotTicketProperties,
   getHubSpotSettings,
   getNetworkMappings,
   getNetworkOptions,
   getNetworkSettings,
   HubSpotPipeline,
   HubSpotSettings,
+  HubSpotTicketProperty,
   NetworkMapping,
   testHubSpotConnection,
   updateHubSpotSettings,
@@ -43,26 +45,29 @@ const EMPTY_HUBSPOT_SETTINGS: HubSpotSettings = {
   token_configured: false,
 };
 
-function formatMappingLines(mapping: Record<string, string>) {
-  return Object.entries(mapping)
-    .map(([left, right]) => `${left}=${right}`)
-    .join("\n");
-}
+const QUOTE_STATUS_OPTIONS = [
+  "Draft",
+  "Quote Submitted",
+  "In Review",
+  "Needs Action",
+  "Proposal",
+  "Sold",
+  "Lost",
+  "Submitted",
+];
 
-function parseMappingLines(raw: string) {
-  const mapping: Record<string, string> = {};
-  for (const line of raw.split("\n")) {
-    const trimmed = line.trim();
-    if (!trimmed || trimmed.startsWith("#")) continue;
-    const separatorIndex = trimmed.indexOf("=");
-    if (separatorIndex <= 0 || separatorIndex >= trimmed.length - 1) continue;
-    const key = trimmed.slice(0, separatorIndex).trim();
-    const value = trimmed.slice(separatorIndex + 1).trim();
-    if (!key || !value) continue;
-    mapping[key] = value;
-  }
-  return mapping;
-}
+const HUBSPOT_LOCAL_FIELD_OPTIONS = [
+  { key: "id", label: "Quote ID" },
+  { key: "company", label: "Company" },
+  { key: "status", label: "Quote Status" },
+  { key: "effective_date", label: "Effective Date" },
+  { key: "broker_org", label: "Broker Organization" },
+  { key: "sponsor_domain", label: "Sponsor Domain" },
+  { key: "employer_domain", label: "Employer Domain" },
+  { key: "quote_deadline", label: "Quote Deadline" },
+  { key: "current_enrolled", label: "Current Enrolled" },
+  { key: "current_eligible", label: "Current Eligible" },
+];
 
 export default function Configuration() {
   const [networkOptions, setNetworkOptions] = useState<string[]>([]);
@@ -71,10 +76,10 @@ export default function Configuration() {
     EMPTY_HUBSPOT_SETTINGS
   );
   const [hubspotTokenInput, setHubspotTokenInput] = useState("");
-  const [hubspotPropertyMappingsText, setHubspotPropertyMappingsText] = useState("");
-  const [hubspotQuoteStatusToStageText, setHubspotQuoteStatusToStageText] = useState("");
-  const [hubspotStageToQuoteStatusText, setHubspotStageToQuoteStatusText] = useState("");
   const [hubspotPipelines, setHubspotPipelines] = useState<HubSpotPipeline[]>([]);
+  const [hubspotTicketProperties, setHubspotTicketProperties] = useState<HubSpotTicketProperty[]>(
+    []
+  );
   const [hubspotTestMessage, setHubspotTestMessage] = useState<string | null>(null);
   const [settings, setSettings] = useState({
     default_network: "Cigna_PPO",
@@ -105,15 +110,9 @@ export default function Configuration() {
         setNetworkMappings(mappings);
         setSettings(nextSettings);
         setHubspotSettings(nextHubspotSettings);
-        setHubspotPropertyMappingsText(formatMappingLines(nextHubspotSettings.property_mappings));
-        setHubspotQuoteStatusToStageText(
-          formatMappingLines(nextHubspotSettings.quote_status_to_stage)
-        );
-        setHubspotStageToQuoteStatusText(
-          formatMappingLines(nextHubspotSettings.stage_to_quote_status)
-        );
         setHubspotTokenInput("");
         setHubspotPipelines([]);
+        setHubspotTicketProperties([]);
         setHubspotTestMessage(null);
         setNewMapping((prev) => ({
           ...prev,
@@ -289,9 +288,9 @@ export default function Configuration() {
         sync_hubspot_to_quote: hubspotSettings.sync_hubspot_to_quote,
         ticket_subject_template: hubspotSettings.ticket_subject_template,
         ticket_content_template: hubspotSettings.ticket_content_template,
-        property_mappings: parseMappingLines(hubspotPropertyMappingsText),
-        quote_status_to_stage: parseMappingLines(hubspotQuoteStatusToStageText),
-        stage_to_quote_status: parseMappingLines(hubspotStageToQuoteStatusText),
+        property_mappings: hubspotSettings.property_mappings,
+        quote_status_to_stage: hubspotSettings.quote_status_to_stage,
+        stage_to_quote_status: hubspotSettings.stage_to_quote_status,
         private_app_token: hubspotTokenInput.trim() ? hubspotTokenInput.trim() : undefined,
       });
       setHubspotSettings(next);
@@ -331,6 +330,132 @@ export default function Configuration() {
     } finally {
       setBusy(false);
     }
+  };
+
+  const handleLoadHubSpotProperties = async () => {
+    setBusy(true);
+    setError(null);
+    try {
+      const properties = await getHubSpotTicketProperties();
+      setHubspotTicketProperties(properties);
+      setStatusMessage(`Loaded ${properties.length} HubSpot ticket properties.`);
+    } catch (err: any) {
+      setError(err.message);
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  const selectedPipeline = useMemo(
+    () => hubspotPipelines.find((pipeline) => pipeline.id === hubspotSettings.pipeline_id) || null,
+    [hubspotPipelines, hubspotSettings.pipeline_id]
+  );
+
+  const stageOptions = useMemo(() => {
+    const fromPipelines = hubspotPipelines.flatMap((pipeline) =>
+      pipeline.stages.map((stage) => ({
+        id: stage.id,
+        label: `${stage.label} (${stage.id})`,
+      }))
+    );
+    const byId: Record<string, string> = {};
+    for (const stage of fromPipelines) byId[stage.id] = stage.label;
+    Object.keys(hubspotSettings.quote_status_to_stage).forEach((status) => {
+      const stageId = hubspotSettings.quote_status_to_stage[status];
+      if (stageId && !byId[stageId]) byId[stageId] = stageId;
+    });
+    Object.keys(hubspotSettings.stage_to_quote_status).forEach((stageId) => {
+      if (stageId && !byId[stageId]) byId[stageId] = stageId;
+    });
+    return Object.entries(byId)
+      .map(([id, label]) => ({ id, label }))
+      .sort((a, b) => a.label.localeCompare(b.label));
+  }, [hubspotPipelines, hubspotSettings.quote_status_to_stage, hubspotSettings.stage_to_quote_status]);
+
+  const quoteStatusRows = useMemo(() => {
+    const extra = Object.keys(hubspotSettings.quote_status_to_stage).filter(
+      (status) => !QUOTE_STATUS_OPTIONS.includes(status)
+    );
+    return [...QUOTE_STATUS_OPTIONS, ...extra];
+  }, [hubspotSettings.quote_status_to_stage]);
+
+  const stageToStatusRows = useMemo(() => {
+    const fromSelectedPipeline = selectedPipeline?.stages.map((stage) => stage.id) || [];
+    const extra = Object.keys(hubspotSettings.stage_to_quote_status).filter(
+      (stageId) => !fromSelectedPipeline.includes(stageId)
+    );
+    return [...fromSelectedPipeline, ...extra];
+  }, [selectedPipeline, hubspotSettings.stage_to_quote_status]);
+
+  const propertyMappingRows = useMemo(() => {
+    const knownKeys = HUBSPOT_LOCAL_FIELD_OPTIONS.map((item) => item.key);
+    const extra = Object.keys(hubspotSettings.property_mappings).filter(
+      (key) => !knownKeys.includes(key)
+    );
+    return [...knownKeys, ...extra];
+  }, [hubspotSettings.property_mappings]);
+
+  const propertyOptions = useMemo(() => {
+    const byName: Record<string, string> = {};
+    for (const property of hubspotTicketProperties) {
+      byName[property.name] = `${property.label} (${property.name})`;
+    }
+    Object.values(hubspotSettings.property_mappings).forEach((name) => {
+      if (name && !byName[name]) byName[name] = name;
+    });
+    return Object.entries(byName)
+      .map(([name, label]) => ({ name, label }))
+      .sort((a, b) => a.label.localeCompare(b.label));
+  }, [hubspotTicketProperties, hubspotSettings.property_mappings]);
+
+  const localFieldLabelByKey = useMemo(
+    () =>
+      Object.fromEntries(HUBSPOT_LOCAL_FIELD_OPTIONS.map((item) => [item.key, item.label])),
+    []
+  );
+
+  const stageLabelById = useMemo(
+    () =>
+      Object.fromEntries(
+        stageOptions.map((stage) => [stage.id, stage.label])
+      ) as Record<string, string>,
+    [stageOptions]
+  );
+
+  const setPropertyMapping = (localField: string, propertyName: string) => {
+    setHubspotSettings((prev) => {
+      const next = { ...prev.property_mappings };
+      if (!propertyName) {
+        delete next[localField];
+      } else {
+        next[localField] = propertyName;
+      }
+      return { ...prev, property_mappings: next };
+    });
+  };
+
+  const setQuoteStatusStageMapping = (quoteStatus: string, stageId: string) => {
+    setHubspotSettings((prev) => {
+      const next = { ...prev.quote_status_to_stage };
+      if (!stageId) {
+        delete next[quoteStatus];
+      } else {
+        next[quoteStatus] = stageId;
+      }
+      return { ...prev, quote_status_to_stage: next };
+    });
+  };
+
+  const setStageQuoteStatusMapping = (stageId: string, quoteStatus: string) => {
+    setHubspotSettings((prev) => {
+      const next = { ...prev.stage_to_quote_status };
+      if (!quoteStatus) {
+        delete next[stageId];
+      } else {
+        next[stageId] = quoteStatus;
+      }
+      return { ...prev, stage_to_quote_status: next };
+    });
   };
 
   const optionPagination = useMemo(
@@ -541,40 +666,110 @@ export default function Configuration() {
           </label>
         </div>
 
-        <div style={{ marginTop: 10 }}>
-          <label style={{ display: "block" }}>
-            Property Mappings (`local_field=hubspot_property`)
-            <textarea
-              value={hubspotPropertyMappingsText}
-              onChange={(e) => setHubspotPropertyMappingsText(e.target.value)}
-              rows={4}
-              placeholder={"id=level_health_quote_id\ncompany=level_health_company\nstatus=level_health_quote_status"}
-            />
-          </label>
+        <div style={{ marginTop: 12 }}>
+          <h4 style={{ marginBottom: 8 }}>Field Mapping</h4>
+          <div className="helper" style={{ marginBottom: 8 }}>
+            Map portal quote fields to HubSpot ticket properties.
+          </div>
+          <table className="table">
+            <thead>
+              <tr>
+                <th>Portal Field</th>
+                <th>HubSpot Ticket Property</th>
+              </tr>
+            </thead>
+            <tbody>
+              {propertyMappingRows.map((localField) => (
+                <tr key={localField}>
+                  <td>{localFieldLabelByKey[localField] || localField}</td>
+                  <td>
+                    <select
+                      value={hubspotSettings.property_mappings[localField] || ""}
+                      onChange={(e) => setPropertyMapping(localField, e.target.value)}
+                    >
+                      <option value="">Not mapped</option>
+                      {propertyOptions.map((property) => (
+                        <option key={property.name} value={property.name}>
+                          {property.label}
+                        </option>
+                      ))}
+                    </select>
+                  </td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
         </div>
 
-        <div style={{ marginTop: 10 }}>
-          <label style={{ display: "block" }}>
-            Quote Status -&gt; HubSpot Stage (`Quote Status=Stage ID`)
-            <textarea
-              value={hubspotQuoteStatusToStageText}
-              onChange={(e) => setHubspotQuoteStatusToStageText(e.target.value)}
-              rows={4}
-              placeholder={"Draft=1\nQuote Submitted=2\nSold=3"}
-            />
-          </label>
+        <div style={{ marginTop: 12 }}>
+          <h4 style={{ marginBottom: 8 }}>Quote Status to HubSpot Stage</h4>
+          <table className="table">
+            <thead>
+              <tr>
+                <th>Quote Status</th>
+                <th>HubSpot Stage</th>
+              </tr>
+            </thead>
+            <tbody>
+              {quoteStatusRows.map((status) => (
+                <tr key={status}>
+                  <td>{status}</td>
+                  <td>
+                    <select
+                      value={hubspotSettings.quote_status_to_stage[status] || ""}
+                      onChange={(e) => setQuoteStatusStageMapping(status, e.target.value)}
+                    >
+                      <option value="">Not mapped</option>
+                      {stageOptions.map((stage) => (
+                        <option key={stage.id} value={stage.id}>
+                          {stage.label}
+                        </option>
+                      ))}
+                    </select>
+                  </td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
         </div>
 
-        <div style={{ marginTop: 10 }}>
-          <label style={{ display: "block" }}>
-            HubSpot Stage -&gt; Quote Status (`Stage ID=Quote Status`)
-            <textarea
-              value={hubspotStageToQuoteStatusText}
-              onChange={(e) => setHubspotStageToQuoteStatusText(e.target.value)}
-              rows={4}
-              placeholder={"1=Draft\n2=Quote Submitted\n3=Sold"}
-            />
-          </label>
+        <div style={{ marginTop: 12 }}>
+          <h4 style={{ marginBottom: 8 }}>HubSpot Stage to Quote Status</h4>
+          <table className="table">
+            <thead>
+              <tr>
+                <th>HubSpot Stage</th>
+                <th>Quote Status</th>
+              </tr>
+            </thead>
+            <tbody>
+              {stageToStatusRows.map((stageId) => (
+                <tr key={stageId}>
+                  <td>{stageLabelById[stageId] || stageId}</td>
+                  <td>
+                    <select
+                      value={hubspotSettings.stage_to_quote_status[stageId] || ""}
+                      onChange={(e) => setStageQuoteStatusMapping(stageId, e.target.value)}
+                    >
+                      <option value="">Not mapped</option>
+                      {quoteStatusRows.map((status) => (
+                        <option key={status} value={status}>
+                          {status}
+                        </option>
+                      ))}
+                    </select>
+                  </td>
+                </tr>
+              ))}
+              {stageToStatusRows.length === 0 && (
+                <tr>
+                  <td colSpan={2} className="helper">
+                    Load pipelines to map stages.
+                  </td>
+                </tr>
+              )}
+            </tbody>
+          </table>
         </div>
 
         <div className="inline-actions" style={{ marginTop: 12 }}>
@@ -596,6 +791,14 @@ export default function Configuration() {
             disabled={busy}
           >
             Load Pipelines
+          </button>
+          <button
+            className="button ghost"
+            type="button"
+            onClick={handleLoadHubSpotProperties}
+            disabled={busy}
+          >
+            Load Ticket Properties
           </button>
         </div>
 
