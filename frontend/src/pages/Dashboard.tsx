@@ -268,32 +268,6 @@ export default function Dashboard() {
     return actionItems.filter((item) => item.tags.includes(queueFilter)).slice(0, 12);
   }, [actionItems, queueFilter]);
 
-  const blockers = useMemo(() => {
-    let missingCensus = 0;
-    let censusIssues = 0;
-    let missingAssignment = 0;
-    let overdueTasks = 0;
-
-    quotes.forEach((quote) => {
-      if (!quote.needs_action) return;
-      const reason = getNeedsActionReason(quote);
-      if (reason === "Missing census upload") missingCensus += 1;
-      if (reason === "Census issues") censusIssues += 1;
-      if (reason === "Missing network assignment") missingAssignment += 1;
-    });
-
-    const today = startOfToday();
-    tasks
-      .filter((task) => !COMPLETED_TASK_STATES.has(task.state))
-      .forEach((task) => {
-        const due = parseDateOnly(task.due_date);
-        if (!due) return;
-        if (diffInDays(due, today) < 0) overdueTasks += 1;
-      });
-
-    return { missingCensus, censusIssues, missingAssignment, overdueTasks };
-  }, [quotes, tasks, needsActionDetails]);
-
   const activeQuotes = useMemo(
     () => quotes.filter((quote) => ACTIVE_QUOTE_STATUSES.has(getQuoteStageLabel(quote.status))),
     [quotes]
@@ -409,18 +383,12 @@ export default function Dashboard() {
     return { submittedQuotes, openTasks, needsAction, deadlines14 };
   }, [quotes, tasks, timelineItems]);
 
-  const roleLabel = role === "admin" ? "Team Work Queue" : "My Work Queue";
-  const roleHint =
-    role === "admin"
-      ? "Prioritize bottlenecks first, then move submitted groups through assignment and proposal."
-      : "Focus on your highest-priority quotes and implementation tasks first.";
-
   return (
     <div>
       <section className="section dashboard-hero">
         <div>
-          <h2>{roleLabel}</h2>
-          <div className="helper">{roleHint}</div>
+          <h2>Home</h2>
+          <div className="helper">Focus on your highest-priority quotes and implementation tasks first.</div>
         </div>
         <div className="dashboard-quick-actions">
           <Link className="button" to="/quotes/new">
@@ -526,28 +494,6 @@ export default function Dashboard() {
                 </div>
               </div>
             ))}
-          </section>
-
-          <section className="section">
-            <h3>Blockers</h3>
-            <div className="dashboard-blockers-grid">
-              <div className="dashboard-blocker-card">
-                <span className="helper">Missing Census</span>
-                <strong>{blockers.missingCensus}</strong>
-              </div>
-              <div className="dashboard-blocker-card">
-                <span className="helper">Census Issues</span>
-                <strong>{blockers.censusIssues}</strong>
-              </div>
-              <div className="dashboard-blocker-card">
-                <span className="helper">Missing Assignment</span>
-                <strong>{blockers.missingAssignment}</strong>
-              </div>
-              <div className="dashboard-blocker-card">
-                <span className="helper">Overdue Tasks</span>
-                <strong>{blockers.overdueTasks}</strong>
-              </div>
-            </div>
           </section>
 
           <section className="section">
