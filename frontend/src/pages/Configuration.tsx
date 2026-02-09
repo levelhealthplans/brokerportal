@@ -12,7 +12,11 @@ import {
   updateNetworkOption,
   updateNetworkSettings,
 } from "../api";
-import { paginateItems, TablePagination } from "../components/TablePagination";
+import {
+  paginateItems,
+  TABLE_PAGE_SIZE,
+  TablePagination,
+} from "../components/TablePagination";
 import { useAutoDismissMessage } from "../hooks/useAutoDismissMessage";
 import { formatNetworkLabel } from "../utils/formatNetwork";
 
@@ -185,11 +189,11 @@ export default function Configuration() {
   };
 
   const optionPagination = useMemo(
-    () => paginateItems(networkOptions, optionPage),
+    () => paginateItems(networkOptions, optionPage, TABLE_PAGE_SIZE),
     [networkOptions, optionPage]
   );
   const mappingPagination = useMemo(
-    () => paginateItems(networkMappings, mappingPage),
+    () => paginateItems(networkMappings, mappingPage, TABLE_PAGE_SIZE),
     [networkMappings, mappingPage]
   );
 
@@ -350,6 +354,7 @@ export default function Configuration() {
         <TablePagination
           page={optionPagination.currentPage}
           totalItems={networkOptions.length}
+          pageSize={TABLE_PAGE_SIZE}
           onPageChange={setOptionPage}
         />
       </section>
@@ -487,6 +492,7 @@ export default function Configuration() {
         <TablePagination
           page={mappingPagination.currentPage}
           totalItems={networkMappings.length}
+          pageSize={TABLE_PAGE_SIZE}
           onPageChange={setMappingPage}
         />
       </section>
