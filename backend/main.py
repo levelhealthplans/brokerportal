@@ -19,7 +19,7 @@ import openpyxl
 import xlrd
 from fastapi import FastAPI, File, Form, HTTPException, Request, Response, UploadFile
 from fastapi.middleware.cors import CORSMiddleware
-from fastapi.responses import FileResponse
+from fastapi.responses import FileResponse, HTMLResponse
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel
 
@@ -102,6 +102,12 @@ TASK_STATE_CANONICAL = {
 ALLOWED_USER_ROLES = {"admin", "broker", "sponsor"}
 PASSWORD_MIN_LENGTH = 8
 HUBSPOT_API_BASE = "https://api.hubapi.com"
+HUBSPOT_OAUTH_AUTHORIZE_URL = "https://app.hubspot.com/oauth/authorize"
+HUBSPOT_OAUTH_TOKEN_URL = "https://api.hubapi.com/oauth/v1/token"
+HUBSPOT_OAUTH_STATE_MINUTES = 15
+HUBSPOT_OAUTH_DEFAULT_SCOPES = (
+    "crm.objects.tickets.read crm.objects.tickets.write crm.schemas.tickets.read"
+)
 
 app = FastAPI(title="Level Health Broker Portal API")
 
@@ -394,6 +400,17 @@ def init_db() -> None:
                 expires_at TEXT,
                 created_at TEXT,
                 last_seen_at TEXT
+            )
+            """
+        )
+        cur.execute(
+            """
+            CREATE TABLE IF NOT EXISTS HubSpotOAuthState(
+                id TEXT PRIMARY KEY,
+                state TEXT UNIQUE,
+                redirect_uri TEXT,
+                expires_at TEXT,
+                created_at TEXT
             )
             """
         )
@@ -1738,6 +1755,9 @@ class HubSpotSettingsOut(BaseModel):
     quote_status_to_stage: Dict[str, str]
     stage_to_quote_status: Dict[str, str]
     token_configured: bool
+    oauth_connected: bool
+    oauth_hub_id: Optional[str]
+    oauth_redirect_uri: Optional[str]
 
 
 class HubSpotSettingsUpdate(BaseModel):
@@ -1753,6 +1773,19 @@ class HubSpotSettingsUpdate(BaseModel):
     quote_status_to_stage: Optional[Dict[str, str]] = None
     stage_to_quote_status: Optional[Dict[str, str]] = None
     private_app_token: Optional[str] = None
+    oauth_redirect_uri: Optional[str] = None
+
+
+class HubSpotOAuthStartIn(BaseModel):
+    redirect_uri: Optional[str] = None
+
+
+class HubSpotOAuthStartOut(BaseModel):
+    authorize_url: str
+
+
+class HubSpotOAuthStatusOut(BaseModel):
+    status: str
 
 
 class HubSpotTestResponse(BaseModel):
@@ -1841,8 +1874,51 @@ def default_hubspot_settings() -> Dict[str, Any]:
         },
         "quote_status_to_stage": {},
         "stage_to_quote_status": {},
+        "oauth_redirect_uri": (os.getenv("HUBSPOT_OAUTH_REDIRECT_URI", "") or "").strip(),
         "private_app_token": (os.getenv("HUBSPOT_PRIVATE_APP_TOKEN", "") or "").strip(),
+        "oauth_access_token": "",
+        "oauth_refresh_token": "",
+        "oauth_expires_at": "",
+        "oauth_hub_id": "",
     }
+
+
+def serialize_hubspot_settings_for_storage(settings: Dict[str, Any]) -> Dict[str, Any]:
+    return {
+        "enabled": bool(settings.get("enabled", False)),
+        "portal_id": str(settings.get("portal_id") or "").strip(),
+        "pipeline_id": str(settings.get("pipeline_id") or "").strip(),
+        "default_stage_id": str(settings.get("default_stage_id") or "").strip(),
+        "sync_quote_to_hubspot": bool(settings.get("sync_quote_to_hubspot", True)),
+        "sync_hubspot_to_quote": bool(settings.get("sync_hubspot_to_quote", True)),
+        "ticket_subject_template": str(settings.get("ticket_subject_template") or "").strip(),
+        "ticket_content_template": str(settings.get("ticket_content_template") or "").strip(),
+        "property_mappings": normalize_mapping_dict(settings.get("property_mappings")),
+        "quote_status_to_stage": normalize_mapping_dict(settings.get("quote_status_to_stage")),
+        "stage_to_quote_status": normalize_mapping_dict(settings.get("stage_to_quote_status")),
+        "oauth_redirect_uri": str(settings.get("oauth_redirect_uri") or "").strip(),
+        "private_app_token": str(settings.get("private_app_token") or "").strip(),
+        "oauth_access_token": str(settings.get("oauth_access_token") or "").strip(),
+        "oauth_refresh_token": str(settings.get("oauth_refresh_token") or "").strip(),
+        "oauth_expires_at": str(settings.get("oauth_expires_at") or "").strip(),
+        "oauth_hub_id": str(settings.get("oauth_hub_id") or "").strip(),
+    }
+
+
+def persist_hubspot_settings(settings: Dict[str, Any]) -> None:
+    HUBSPOT_SETTINGS_PATH.parent.mkdir(parents=True, exist_ok=True)
+    payload = serialize_hubspot_settings_for_storage(settings)
+    HUBSPOT_SETTINGS_PATH.write_text(json.dumps(payload, indent=2), encoding="utf-8")
+
+
+def parse_iso_datetime(value: Optional[str]) -> Optional[datetime]:
+    text = (value or "").strip()
+    if not text:
+        return None
+    try:
+        return datetime.fromisoformat(text)
+    except Exception:
+        return None
 
 
 def read_hubspot_settings(*, include_token: bool = False) -> Dict[str, Any]:
@@ -1856,7 +1932,13 @@ def read_hubspot_settings(*, include_token: bool = False) -> Dict[str, Any]:
         except Exception:
             raw = {}
 
-    token = str(raw.get("private_app_token") or defaults["private_app_token"]).strip()
+    private_token = str(raw.get("private_app_token") or defaults["private_app_token"]).strip()
+    oauth_access_token = str(raw.get("oauth_access_token") or defaults["oauth_access_token"]).strip()
+    oauth_refresh_token = str(raw.get("oauth_refresh_token") or defaults["oauth_refresh_token"]).strip()
+    oauth_expires_at = str(raw.get("oauth_expires_at") or defaults["oauth_expires_at"]).strip()
+    oauth_hub_id = str(raw.get("oauth_hub_id") or defaults["oauth_hub_id"]).strip()
+    oauth_redirect_uri = str(raw.get("oauth_redirect_uri") or defaults["oauth_redirect_uri"]).strip()
+
     payload = {
         "enabled": bool(raw.get("enabled", defaults["enabled"])),
         "portal_id": str(raw.get("portal_id") or defaults["portal_id"]).strip() or defaults["portal_id"],
@@ -1877,10 +1959,18 @@ def read_hubspot_settings(*, include_token: bool = False) -> Dict[str, Any]:
         ),
         "quote_status_to_stage": normalize_mapping_dict(raw.get("quote_status_to_stage")),
         "stage_to_quote_status": normalize_mapping_dict(raw.get("stage_to_quote_status")),
-        "token_configured": bool(token),
+        "token_configured": bool(private_token or oauth_access_token),
+        "oauth_connected": bool(oauth_access_token and oauth_refresh_token),
+        "oauth_hub_id": oauth_hub_id or None,
+        "oauth_redirect_uri": oauth_redirect_uri or None,
     }
     if include_token:
-        payload["private_app_token"] = token
+        payload["private_app_token"] = private_token
+        payload["oauth_access_token"] = oauth_access_token
+        payload["oauth_refresh_token"] = oauth_refresh_token
+        payload["oauth_expires_at"] = oauth_expires_at
+        payload["oauth_hub_id"] = oauth_hub_id
+        payload["oauth_redirect_uri"] = oauth_redirect_uri
     return payload
 
 
@@ -1889,7 +1979,6 @@ def write_hubspot_settings(
     *,
     existing_token: Optional[str],
 ) -> Dict[str, Any]:
-    HUBSPOT_SETTINGS_PATH.parent.mkdir(parents=True, exist_ok=True)
     current = read_hubspot_settings(include_token=True)
     current_token = (existing_token if existing_token is not None else current.get("private_app_token")) or ""
     next_token = current_token
@@ -1926,10 +2015,95 @@ def write_hubspot_settings(
             if payload.stage_to_quote_status is not None
             else current["stage_to_quote_status"]
         ),
+        "oauth_redirect_uri": str(
+            payload.oauth_redirect_uri
+            if payload.oauth_redirect_uri is not None
+            else (current.get("oauth_redirect_uri") or "")
+        ).strip(),
         "private_app_token": next_token,
+        "oauth_access_token": current.get("oauth_access_token") or "",
+        "oauth_refresh_token": current.get("oauth_refresh_token") or "",
+        "oauth_expires_at": current.get("oauth_expires_at") or "",
+        "oauth_hub_id": current.get("oauth_hub_id") or "",
     }
-    HUBSPOT_SETTINGS_PATH.write_text(json.dumps(saved, indent=2), encoding="utf-8")
+    persist_hubspot_settings(saved)
     return read_hubspot_settings(include_token=False)
+
+
+def exchange_hubspot_oauth_token(form_payload: Dict[str, str]) -> Dict[str, Any]:
+    body = urlparse.urlencode(form_payload).encode("utf-8")
+    req = urlrequest.Request(
+        HUBSPOT_OAUTH_TOKEN_URL,
+        data=body,
+        headers={"Content-Type": "application/x-www-form-urlencoded"},
+        method="POST",
+    )
+    try:
+        with urlrequest.urlopen(req, timeout=20) as resp:
+            raw = resp.read().decode("utf-8").strip()
+            if not raw:
+                raise HTTPException(status_code=502, detail="HubSpot OAuth returned an empty response")
+            parsed = json.loads(raw)
+            if not isinstance(parsed, dict):
+                raise HTTPException(status_code=502, detail="Invalid HubSpot OAuth response")
+            return parsed
+    except urlerror.HTTPError as exc:
+        detail = ""
+        try:
+            detail = exc.read().decode("utf-8")
+        except Exception:
+            detail = str(exc)
+        raise HTTPException(status_code=502, detail=f"HubSpot OAuth error ({exc.code}): {detail}")
+    except HTTPException:
+        raise
+    except Exception as exc:
+        raise HTTPException(status_code=502, detail=f"HubSpot OAuth request failed: {exc}")
+
+
+def resolve_hubspot_api_token(settings: Dict[str, Any]) -> str:
+    oauth_access_token = str(settings.get("oauth_access_token") or "").strip()
+    oauth_refresh_token = str(settings.get("oauth_refresh_token") or "").strip()
+    oauth_expires_at = parse_iso_datetime(settings.get("oauth_expires_at"))
+
+    if oauth_access_token:
+        # Refresh the OAuth access token when it is close to expiry.
+        if oauth_refresh_token and oauth_expires_at and oauth_expires_at <= datetime.utcnow() + timedelta(minutes=1):
+            client_id = os.getenv("HUBSPOT_CLIENT_ID", "").strip()
+            client_secret = os.getenv("HUBSPOT_CLIENT_SECRET", "").strip()
+            if not client_id or not client_secret:
+                raise HTTPException(
+                    status_code=400,
+                    detail="HubSpot OAuth client credentials are not configured",
+                )
+            refreshed = exchange_hubspot_oauth_token(
+                {
+                    "grant_type": "refresh_token",
+                    "client_id": client_id,
+                    "client_secret": client_secret,
+                    "refresh_token": oauth_refresh_token,
+                }
+            )
+            next_access_token = str(refreshed.get("access_token") or "").strip()
+            next_refresh_token = str(refreshed.get("refresh_token") or oauth_refresh_token).strip()
+            expires_in = int(refreshed.get("expires_in") or 0)
+            settings["oauth_access_token"] = next_access_token
+            settings["oauth_refresh_token"] = next_refresh_token
+            settings["oauth_expires_at"] = (
+                (datetime.utcnow() + timedelta(seconds=max(expires_in - 60, 60))).isoformat()
+                if expires_in
+                else ""
+            )
+            if refreshed.get("hub_id"):
+                settings["oauth_hub_id"] = str(refreshed.get("hub_id"))
+            persist_hubspot_settings(settings)
+            oauth_access_token = next_access_token
+        if oauth_access_token:
+            return oauth_access_token
+
+    private_token = str(settings.get("private_app_token") or "").strip()
+    if private_token:
+        return private_token
+    raise HTTPException(status_code=400, detail="HubSpot token is not configured")
 
 
 def hubspot_api_request(
@@ -2073,12 +2247,13 @@ def sync_quote_to_hubspot(conn: sqlite3.Connection, quote_id: str, *, create_if_
     settings = read_hubspot_settings(include_token=True)
     if not settings["enabled"] or not settings["sync_quote_to_hubspot"]:
         return
-    token = (settings.get("private_app_token") or "").strip()
-    if not token:
+    try:
+        token = resolve_hubspot_api_token(settings)
+    except HTTPException as exc:
         update_quote_hubspot_sync_state(
             conn,
             quote_id,
-            sync_error="HubSpot token is not configured",
+            sync_error=str(exc.detail),
         )
         return
 
@@ -2138,7 +2313,7 @@ def sync_quote_to_hubspot(conn: sqlite3.Connection, quote_id: str, *, create_if_
 
 
 def list_hubspot_ticket_pipelines(settings: Dict[str, Any]) -> List[Dict[str, Any]]:
-    token = (settings.get("private_app_token") or "").strip()
+    token = resolve_hubspot_api_token(settings)
     raw = hubspot_api_request(token, "GET", "/crm/v3/pipelines/tickets")
     pipelines: List[Dict[str, Any]] = []
     for item in raw.get("results", []):
@@ -2159,7 +2334,7 @@ def list_hubspot_ticket_pipelines(settings: Dict[str, Any]) -> List[Dict[str, An
 
 
 def list_hubspot_ticket_properties(settings: Dict[str, Any]) -> List[Dict[str, str]]:
-    token = (settings.get("private_app_token") or "").strip()
+    token = resolve_hubspot_api_token(settings)
     raw = hubspot_api_request(
         token,
         "GET",
@@ -2182,9 +2357,7 @@ def sync_quote_from_hubspot(conn: sqlite3.Connection, quote_id: str) -> Dict[str
         raise HTTPException(status_code=400, detail="HubSpot integration is disabled")
     if not settings["sync_hubspot_to_quote"]:
         raise HTTPException(status_code=400, detail="HubSpot -> portal sync is disabled")
-    token = (settings.get("private_app_token") or "").strip()
-    if not token:
-        raise HTTPException(status_code=400, detail="HubSpot token is not configured")
+    token = resolve_hubspot_api_token(settings)
 
     quote = dict(fetch_quote(conn, quote_id))
     ticket_id = str(quote.get("hubspot_ticket_id") or "").strip()
@@ -2642,6 +2815,179 @@ def update_hubspot_settings(payload: HubSpotSettingsUpdate, request: Request) ->
         existing_token=current.get("private_app_token"),
     )
     return HubSpotSettingsOut(**saved)
+
+
+def hubspot_oauth_popup_response(status: str, message: str) -> HTMLResponse:
+    payload_json = json.dumps(
+        {
+            "type": "hubspot-oauth",
+            "status": status,
+            "message": message,
+        }
+    )
+    html = f"""<!doctype html>
+<html>
+  <head>
+    <meta charset="utf-8" />
+    <title>HubSpot Connection</title>
+  </head>
+  <body>
+    <script>
+      (function () {{
+        var payload = {payload_json};
+        try {{
+          if (window.opener) {{
+            window.opener.postMessage(payload, window.location.origin);
+          }}
+        }} catch (e) {{}}
+        if (payload.status === "success") {{
+          document.body.innerText = "HubSpot connected. You can close this window.";
+        }} else {{
+          document.body.innerText = "HubSpot connection failed: " + payload.message;
+        }}
+        setTimeout(function () {{
+          try {{ window.close(); }} catch (e) {{}}
+        }}, 300);
+      }})();
+    </script>
+  </body>
+</html>"""
+    return HTMLResponse(content=html)
+
+
+@app.post("/api/integrations/hubspot/oauth/start", response_model=HubSpotOAuthStartOut)
+def start_hubspot_oauth(payload: HubSpotOAuthStartIn, request: Request) -> HubSpotOAuthStartOut:
+    client_id = os.getenv("HUBSPOT_CLIENT_ID", "").strip()
+    client_secret = os.getenv("HUBSPOT_CLIENT_SECRET", "").strip()
+    if not client_id or not client_secret:
+        raise HTTPException(
+            status_code=400,
+            detail="HubSpot OAuth client credentials are not configured",
+        )
+    settings = read_hubspot_settings(include_token=True)
+    redirect_uri = (
+        (payload.redirect_uri or "").strip()
+        or (settings.get("oauth_redirect_uri") or "").strip()
+        or f"{FRONTEND_BASE_URL}/api/integrations/hubspot/oauth/callback"
+    )
+    if not redirect_uri.startswith("https://") and not redirect_uri.startswith("http://"):
+        raise HTTPException(status_code=400, detail="Invalid redirect_uri")
+
+    scopes = (os.getenv("HUBSPOT_OAUTH_SCOPES", HUBSPOT_OAUTH_DEFAULT_SCOPES) or "").strip()
+    if not scopes:
+        scopes = HUBSPOT_OAUTH_DEFAULT_SCOPES
+
+    state_token = secrets.token_urlsafe(32)
+    created_at = now_iso()
+    expires_at = (datetime.utcnow() + timedelta(minutes=HUBSPOT_OAUTH_STATE_MINUTES)).isoformat()
+    with get_db() as conn:
+        require_session_role(conn, request, {"admin"})
+        cur = conn.cursor()
+        cur.execute("DELETE FROM HubSpotOAuthState WHERE expires_at <= ?", (now_iso(),))
+        cur.execute(
+            """
+            INSERT INTO HubSpotOAuthState (id, state, redirect_uri, expires_at, created_at)
+            VALUES (?, ?, ?, ?, ?)
+            """,
+            (str(uuid.uuid4()), state_token, redirect_uri, expires_at, created_at),
+        )
+        conn.commit()
+
+    query = urlparse.urlencode(
+        {
+            "client_id": client_id,
+            "redirect_uri": redirect_uri,
+            "scope": scopes,
+            "state": state_token,
+        }
+    )
+    authorize_url = f"{HUBSPOT_OAUTH_AUTHORIZE_URL}?{query}"
+    return HubSpotOAuthStartOut(authorize_url=authorize_url)
+
+
+@app.get("/api/integrations/hubspot/oauth/callback")
+def hubspot_oauth_callback(
+    code: Optional[str] = None,
+    state: Optional[str] = None,
+    error: Optional[str] = None,
+    error_description: Optional[str] = None,
+) -> HTMLResponse:
+    if error:
+        detail = (error_description or error or "OAuth authorization was denied").strip()
+        return hubspot_oauth_popup_response("error", detail)
+    if not code or not state:
+        return hubspot_oauth_popup_response("error", "Missing code or state")
+
+    with get_db() as conn:
+        cur = conn.cursor()
+        cur.execute(
+            """
+            SELECT * FROM HubSpotOAuthState
+            WHERE state = ? AND expires_at > ?
+            ORDER BY created_at DESC
+            LIMIT 1
+            """,
+            (state, now_iso()),
+        )
+        state_row = cur.fetchone()
+        if not state_row:
+            return hubspot_oauth_popup_response("error", "OAuth session expired. Please try again.")
+        cur.execute("DELETE FROM HubSpotOAuthState WHERE state = ?", (state,))
+        conn.commit()
+
+    client_id = os.getenv("HUBSPOT_CLIENT_ID", "").strip()
+    client_secret = os.getenv("HUBSPOT_CLIENT_SECRET", "").strip()
+    if not client_id or not client_secret:
+        return hubspot_oauth_popup_response("error", "HubSpot OAuth client credentials are not configured")
+
+    try:
+        token_payload = exchange_hubspot_oauth_token(
+            {
+                "grant_type": "authorization_code",
+                "client_id": client_id,
+                "client_secret": client_secret,
+                "redirect_uri": state_row["redirect_uri"],
+                "code": code,
+            }
+        )
+        access_token = str(token_payload.get("access_token") or "").strip()
+        refresh_token = str(token_payload.get("refresh_token") or "").strip()
+        hub_id = str(token_payload.get("hub_id") or "").strip()
+        expires_in = int(token_payload.get("expires_in") or 0)
+        if not access_token or not refresh_token:
+            return hubspot_oauth_popup_response("error", "HubSpot OAuth token response was incomplete")
+
+        current = read_hubspot_settings(include_token=True)
+        current["oauth_access_token"] = access_token
+        current["oauth_refresh_token"] = refresh_token
+        current["oauth_expires_at"] = (
+            (datetime.utcnow() + timedelta(seconds=max(expires_in - 60, 60))).isoformat()
+            if expires_in
+            else ""
+        )
+        current["oauth_hub_id"] = hub_id
+        current["oauth_redirect_uri"] = state_row["redirect_uri"]
+        if hub_id:
+            current["portal_id"] = hub_id
+        persist_hubspot_settings(current)
+        return hubspot_oauth_popup_response("success", "HubSpot connection complete")
+    except Exception as exc:
+        if isinstance(exc, HTTPException):
+            return hubspot_oauth_popup_response("error", str(exc.detail))
+        return hubspot_oauth_popup_response("error", str(exc))
+
+
+@app.post("/api/integrations/hubspot/oauth/disconnect", response_model=HubSpotSettingsOut)
+def disconnect_hubspot_oauth(request: Request) -> HubSpotSettingsOut:
+    with get_db() as conn:
+        require_session_role(conn, request, {"admin"})
+    current = read_hubspot_settings(include_token=True)
+    current["oauth_access_token"] = ""
+    current["oauth_refresh_token"] = ""
+    current["oauth_expires_at"] = ""
+    current["oauth_hub_id"] = ""
+    persist_hubspot_settings(current)
+    return HubSpotSettingsOut(**read_hubspot_settings(include_token=False))
 
 
 @app.post("/api/integrations/hubspot/test-connection", response_model=HubSpotTestResponse)

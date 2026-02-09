@@ -257,6 +257,9 @@ export type HubSpotSettings = {
   quote_status_to_stage: Record<string, string>;
   stage_to_quote_status: Record<string, string>;
   token_configured: boolean;
+  oauth_connected: boolean;
+  oauth_hub_id?: string | null;
+  oauth_redirect_uri?: string | null;
 };
 
 export type HubSpotSettingsUpdate = {
@@ -272,6 +275,11 @@ export type HubSpotSettingsUpdate = {
   quote_status_to_stage?: Record<string, string>;
   stage_to_quote_status?: Record<string, string>;
   private_app_token?: string;
+  oauth_redirect_uri?: string;
+};
+
+export type HubSpotOAuthStartResponse = {
+  authorize_url: string;
 };
 
 export type HubSpotTestResponse = {
@@ -569,6 +577,20 @@ export function updateHubSpotSettings(payload: HubSpotSettingsUpdate) {
     method: "PUT",
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify(payload),
+  });
+}
+
+export function startHubSpotOAuth(redirectUri: string) {
+  return request<HubSpotOAuthStartResponse>("/integrations/hubspot/oauth/start", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ redirect_uri: redirectUri }),
+  });
+}
+
+export function disconnectHubSpotOAuth() {
+  return request<HubSpotSettings>("/integrations/hubspot/oauth/disconnect", {
+    method: "POST",
   });
 }
 

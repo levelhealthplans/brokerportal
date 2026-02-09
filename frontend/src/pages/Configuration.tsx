@@ -3,6 +3,7 @@ import {
   cleanupUnassignedRecords,
   createNetworkMapping,
   createNetworkOption,
+  disconnectHubSpotOAuth,
   deleteNetworkMapping,
   deleteNetworkOption,
   getHubSpotPipelines,
@@ -15,6 +16,7 @@ import {
   HubSpotSettings,
   HubSpotTicketProperty,
   NetworkMapping,
+  startHubSpotOAuth,
   testHubSpotConnection,
   updateHubSpotSettings,
   updateNetworkMapping,
@@ -43,6 +45,9 @@ const EMPTY_HUBSPOT_SETTINGS: HubSpotSettings = {
   quote_status_to_stage: {},
   stage_to_quote_status: {},
   token_configured: false,
+  oauth_connected: false,
+  oauth_hub_id: null,
+  oauth_redirect_uri: null,
 };
 
 const QUOTE_STATUS_OPTIONS = [
@@ -124,6 +129,29 @@ export default function Configuration() {
 
   useEffect(() => {
     loadAll();
+  }, []);
+
+  useEffect(() => {
+    const onMessage = (event: MessageEvent) => {
+      if (event.origin !== window.location.origin) return;
+      const payload = event.data as
+        | { type?: string; status?: string; message?: string }
+        | undefined;
+      if (!payload || payload.type !== "hubspot-oauth") return;
+      if (payload.status === "success") {
+        setStatusMessage(payload.message || "HubSpot connected.");
+        getHubSpotSettings()
+          .then((nextSettings) => {
+            setHubspotSettings(nextSettings);
+            setHubspotTokenInput("");
+          })
+          .catch((err: any) => setError(err.message));
+      } else {
+        setError(payload.message || "HubSpot sign-in failed.");
+      }
+    };
+    window.addEventListener("message", onMessage);
+    return () => window.removeEventListener("message", onMessage);
   }, []);
 
   const handleAddOption = async () => {
@@ -291,11 +319,53 @@ export default function Configuration() {
         property_mappings: hubspotSettings.property_mappings,
         quote_status_to_stage: hubspotSettings.quote_status_to_stage,
         stage_to_quote_status: hubspotSettings.stage_to_quote_status,
+        oauth_redirect_uri: (hubspotSettings.oauth_redirect_uri || "").trim() || undefined,
         private_app_token: hubspotTokenInput.trim() ? hubspotTokenInput.trim() : undefined,
       });
       setHubspotSettings(next);
       setHubspotTokenInput("");
       setStatusMessage("HubSpot settings saved.");
+    } catch (err: any) {
+      setError(err.message);
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  const handleConnectHubSpot = async () => {
+    setBusy(true);
+    setError(null);
+    try {
+      const redirectUri =
+        (hubspotSettings.oauth_redirect_uri || "").trim() ||
+        `${window.location.origin}/api/integrations/hubspot/oauth/callback`;
+      const result = await startHubSpotOAuth(redirectUri);
+      const popup = window.open(
+        result.authorize_url,
+        "hubspot_oauth",
+        "width=640,height=780,noopener,noreferrer"
+      );
+      if (!popup) {
+        throw new Error("Popup blocked. Please allow popups and try again.");
+      }
+      popup.focus();
+      setStatusMessage("HubSpot sign-in popup opened.");
+    } catch (err: any) {
+      setError(err.message);
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  const handleDisconnectHubSpot = async () => {
+    const confirmed = window.confirm("Disconnect HubSpot OAuth for this portal?");
+    if (!confirmed) return;
+    setBusy(true);
+    setError(null);
+    try {
+      const next = await disconnectHubSpotOAuth();
+      setHubspotSettings(next);
+      setStatusMessage("HubSpot OAuth disconnected.");
     } catch (err: any) {
       setError(err.message);
     } finally {
@@ -537,8 +607,14 @@ export default function Configuration() {
       <section className="section" style={{ marginTop: 12 }}>
         <h3>HubSpot Integration (Admin)</h3>
         <div className="helper" style={{ marginBottom: 12 }}>
-          MVP flow: a new quote creates a HubSpot ticket. Configure API token, pipeline/stage,
-          and status mappings here.
+          MVP flow: a new quote creates a HubSpot ticket. Use popup sign-in (OAuth) or a private
+          app token, then configure pipeline/stage and mapping rules.
+        </div>
+        <div className="notice" style={{ marginBottom: 12 }}>
+          OAuth Status:{" "}
+          {hubspotSettings.oauth_connected
+            ? `Connected${hubspotSettings.oauth_hub_id ? ` (Hub ID: ${hubspotSettings.oauth_hub_id})` : ""}`
+            : "Not connected"}
         </div>
         <div className="inline-actions">
           <label style={{ minWidth: 220 }}>
@@ -575,6 +651,34 @@ export default function Configuration() {
               placeholder={hubspotSettings.token_configured ? "Token saved (enter to replace)" : "pat-..."}
             />
           </label>
+        </div>
+        <div className="inline-actions" style={{ marginTop: 8 }}>
+          <label style={{ minWidth: 520 }}>
+            OAuth Redirect URI
+            <input
+              value={hubspotSettings.oauth_redirect_uri || ""}
+              onChange={(e) =>
+                setHubspotSettings((prev) => ({
+                  ...prev,
+                  oauth_redirect_uri: e.target.value,
+                }))
+              }
+              placeholder={`${window.location.origin}/api/integrations/hubspot/oauth/callback`}
+            />
+          </label>
+        </div>
+        <div className="inline-actions" style={{ marginTop: 8 }}>
+          <button className="button secondary" type="button" onClick={handleConnectHubSpot} disabled={busy}>
+            Connect HubSpot (Popup)
+          </button>
+          <button
+            className="button ghost"
+            type="button"
+            onClick={handleDisconnectHubSpot}
+            disabled={busy || !hubspotSettings.oauth_connected}
+          >
+            Disconnect OAuth
+          </button>
         </div>
         <div className="inline-actions" style={{ marginTop: 8 }}>
           <label style={{ minWidth: 260 }}>
