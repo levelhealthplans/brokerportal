@@ -1,6 +1,7 @@
 import { NavLink, Navigate, Route, Routes } from "react-router-dom";
 import Dashboard from "./pages/Dashboard";
 import QuotesList from "./pages/QuotesList";
+import Tasks from "./pages/Tasks";
 import NewQuote from "./pages/NewQuote";
 import QuoteDetail from "./pages/QuoteDetail";
 import ImplementationsList from "./pages/ImplementationsList";
@@ -29,6 +30,9 @@ function AppShell() {
           </NavLink>
           <NavLink to="/quotes" end className={({ isActive }) => `side-link${isActive ? " active" : ""}`}>
             Quotes
+          </NavLink>
+          <NavLink to="/tasks" end className={({ isActive }) => `side-link${isActive ? " active" : ""}`}>
+            Tasks
           </NavLink>
           <NavLink to="/quotes/new" className={({ isActive }) => `side-link${isActive ? " active" : ""}`}>
             New Quote
@@ -90,6 +94,7 @@ function AppShell() {
           <Routes>
             <Route path="/" element={<Dashboard />} />
             <Route path="/quotes" element={<QuotesList />} />
+            <Route path="/tasks" element={<Tasks />} />
             <Route path="/quotes/new" element={<NewQuote />} />
             <Route path="/quotes/:id" element={<QuoteDetail />} />
             <Route path="/implementations" element={<ImplementationsList />} />
