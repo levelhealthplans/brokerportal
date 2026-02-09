@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import { Link } from "react-router-dom";
-import { getTasks, Task } from "../api";
+import { getTasks, getUsers, Task, User, updateTask } from "../api";
 import { useAccess } from "../access";
 
 type MultiSelectDropdownProps = {
@@ -78,8 +78,14 @@ function dueDescriptor(value: string | null): string {
 
 export default function Tasks() {
   const { role, email } = useAccess();
+  const isAdmin = role === "admin";
   const [tasks, setTasks] = useState<Task[]>([]);
+  const [users, setUsers] = useState<User[]>([]);
   const [error, setError] = useState<string | null>(null);
+  const [statusMessage, setStatusMessage] = useState<string | null>(null);
+  const [savingTaskId, setSavingTaskId] = useState<string | null>(null);
+  const [dueDateDrafts, setDueDateDrafts] = useState<Record<string, string>>({});
+  const [assignedUserDrafts, setAssignedUserDrafts] = useState<Record<string, string>>({});
   const [stateFilters, setStateFilters] = useState<string[]>([]);
   const [ownerFilters, setOwnerFilters] = useState<string[]>([]);
   const [dueFilter, setDueFilter] = useState<"all" | "overdue" | "today" | "week" | "no_due">("all");
@@ -88,11 +94,25 @@ export default function Tasks() {
   const [sortDirection, setSortDirection] = useState<"asc" | "desc">("asc");
   const filtersRef = useRef<HTMLDivElement | null>(null);
 
+  const loadTasks = async () => {
+    setError(null);
+    const rows = await getTasks({ role, email });
+    setTasks(rows);
+  };
+
   useEffect(() => {
-    getTasks({ role, email })
-      .then(setTasks)
-      .catch((err) => setError(err.message));
+    loadTasks().catch((err) => setError(err.message));
   }, [role, email]);
+
+  useEffect(() => {
+    if (!isAdmin) {
+      setUsers([]);
+      return;
+    }
+    getUsers()
+      .then(setUsers)
+      .catch((err) => setError(err.message));
+  }, [isAdmin]);
 
   useEffect(() => {
     const handleOutsideClick = (event: MouseEvent) => {
@@ -105,6 +125,48 @@ export default function Tasks() {
     document.addEventListener("mousedown", handleOutsideClick);
     return () => document.removeEventListener("mousedown", handleOutsideClick);
   }, []);
+
+  useEffect(() => {
+    setDueDateDrafts(
+      Object.fromEntries(tasks.map((task) => [task.id, task.due_date || ""]))
+    );
+    setAssignedUserDrafts(
+      Object.fromEntries(tasks.map((task) => [task.id, task.assigned_user_id || ""]))
+    );
+  }, [tasks]);
+
+  const userNameById = useMemo(
+    () =>
+      Object.fromEntries(
+        users.map((user) => [user.id, `${user.first_name} ${user.last_name}`.trim()])
+      ),
+    [users]
+  );
+
+  const handleSaveTaskMeta = async (task: Task) => {
+    setSavingTaskId(task.id);
+    setError(null);
+    setStatusMessage(null);
+    try {
+      const dueDate = (dueDateDrafts[task.id] ?? task.due_date ?? "").trim();
+      const assignedUserId = (assignedUserDrafts[task.id] ?? task.assigned_user_id ?? "").trim();
+      await updateTask(
+        task.installation_id,
+        task.id,
+        {
+          due_date: dueDate || null,
+          assigned_user_id: assignedUserId || null,
+        },
+        { role, email }
+      );
+      setStatusMessage("Task assignment and due date updated.");
+      await loadTasks();
+    } catch (err: any) {
+      setError(err.message);
+    } finally {
+      setSavingTaskId(null);
+    }
+  };
 
   const stateOptions = useMemo(
     () => Array.from(new Set(tasks.map((task) => task.state))).sort((a, b) => a.localeCompare(b)),
@@ -183,6 +245,7 @@ export default function Tasks() {
   return (
     <section className="section">
       <h2>Tasks</h2>
+      {statusMessage && <div className="notice notice-success">{statusMessage}</div>}
       {error && <div className="notice">{error}</div>}
       <div className="grid grid-3" style={{ marginBottom: 12 }}>
         <div className="section" style={{ marginBottom: 0 }}>
@@ -284,8 +347,10 @@ export default function Tasks() {
             <th>Task</th>
             <th>Group</th>
             <th>Owner</th>
+            <th>Assigned To</th>
             <th>Due Date</th>
             <th>State</th>
+            {isAdmin && <th>Admin</th>}
             <th>Action</th>
           </tr>
         </thead>
@@ -296,12 +361,59 @@ export default function Tasks() {
               <td>{task.installation_company || "—"}</td>
               <td>{task.owner}</td>
               <td>
+                {task.assigned_user_id
+                  ? userNameById[task.assigned_user_id] || task.assigned_user_id
+                  : "—"}
+              </td>
+              <td>
                 <div>{formatDueDate(task.due_date)}</div>
                 <div className="helper">{dueDescriptor(task.due_date)}</div>
               </td>
               <td>
                 <span className="badge primary">{task.state}</span>
               </td>
+              {isAdmin && (
+                <td>
+                  <div className="task-actions" style={{ justifyContent: "flex-start" }}>
+                    <select
+                      value={assignedUserDrafts[task.id] ?? ""}
+                      onChange={(event) =>
+                        setAssignedUserDrafts((prev) => ({
+                          ...prev,
+                          [task.id]: event.target.value,
+                        }))
+                      }
+                      disabled={savingTaskId === task.id}
+                    >
+                      <option value="">Unassigned</option>
+                      {users.map((user) => (
+                        <option key={user.id} value={user.id}>
+                          {`${user.first_name} ${user.last_name}`.trim()}
+                        </option>
+                      ))}
+                    </select>
+                    <input
+                      type="date"
+                      value={dueDateDrafts[task.id] ?? ""}
+                      onChange={(event) =>
+                        setDueDateDrafts((prev) => ({
+                          ...prev,
+                          [task.id]: event.target.value,
+                        }))
+                      }
+                      disabled={savingTaskId === task.id}
+                    />
+                    <button
+                      className="button ghost"
+                      type="button"
+                      onClick={() => handleSaveTaskMeta(task)}
+                      disabled={savingTaskId === task.id}
+                    >
+                      Save
+                    </button>
+                  </div>
+                </td>
+              )}
               <td>
                 <Link className="table-link" to={`/implementations/${task.installation_id}`}>
                   Open
@@ -311,7 +423,7 @@ export default function Tasks() {
           ))}
           {visibleTasks.length === 0 && (
             <tr>
-              <td colSpan={6} className="helper">
+              <td colSpan={isAdmin ? 8 : 7} className="helper">
                 No tasks match current filters.
               </td>
             </tr>

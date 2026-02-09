@@ -603,7 +603,7 @@ export function advanceTask(installationId: string, taskId: string) {
 export function updateTask(
   installationId: string,
   taskId: string,
-  payload: Partial<Pick<Task, "state" | "task_url">>,
+  payload: Partial<Pick<Task, "state" | "task_url" | "due_date" | "assigned_user_id">>,
   access?: AccessParams
 ) {
   return request<Task>(

@@ -1003,6 +1003,8 @@ class TaskOut(BaseModel):
 class TaskUpdateIn(BaseModel):
     state: Optional[str] = None
     task_url: Optional[str] = None
+    due_date: Optional[str] = None
+    assigned_user_id: Optional[str] = None
 
 
 class TaskListOut(TaskOut):
@@ -3393,6 +3395,34 @@ def update_task(
             url = (updates.get("task_url") or "").strip()
             assignments.append("task_url = ?")
             params.append(url or None)
+
+        if "due_date" in updates:
+            due_date_raw = (updates.get("due_date") or "").strip()
+            if due_date_raw:
+                try:
+                    datetime.strptime(due_date_raw, "%Y-%m-%d")
+                except ValueError:
+                    raise HTTPException(
+                        status_code=400,
+                        detail="Invalid due_date. Use YYYY-MM-DD.",
+                    )
+                assignments.append("due_date = ?")
+                params.append(due_date_raw)
+            else:
+                assignments.append("due_date = ?")
+                params.append(None)
+
+        if "assigned_user_id" in updates:
+            assigned_user_id = (updates.get("assigned_user_id") or "").strip()
+            if assigned_user_id:
+                cur.execute("SELECT id FROM User WHERE id = ?", (assigned_user_id,))
+                if not cur.fetchone():
+                    raise HTTPException(status_code=400, detail="Assigned user not found")
+                assignments.append("assigned_user_id = ?")
+                params.append(assigned_user_id)
+            else:
+                assignments.append("assigned_user_id = ?")
+                params.append(None)
 
         if not assignments:
             raise HTTPException(status_code=400, detail="No valid task fields to update")
