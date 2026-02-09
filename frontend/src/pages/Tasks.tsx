@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import { Link } from "react-router-dom";
-import { getTasks, getUsers, Task, User, updateTask } from "../api";
+import { deleteTask, getTasks, getUsers, Task, User, updateTask } from "../api";
 import { useAccess } from "../access";
 import { paginateItems, TablePagination } from "../components/TablePagination";
 
@@ -162,6 +162,25 @@ export default function Tasks() {
         { role, email }
       );
       setStatusMessage("Task assignment and due date updated.");
+      await loadTasks();
+    } catch (err: any) {
+      setError(err.message);
+    } finally {
+      setSavingTaskId(null);
+    }
+  };
+
+  const handleDeleteTask = async (task: Task) => {
+    const confirmed = window.confirm(
+      `Delete task "${task.title}" for ${task.installation_company || "this implementation"}?`
+    );
+    if (!confirmed) return;
+    setSavingTaskId(task.id);
+    setError(null);
+    setStatusMessage(null);
+    try {
+      await deleteTask(task.id);
+      setStatusMessage("Task deleted.");
       await loadTasks();
     } catch (err: any) {
       setError(err.message);
@@ -423,6 +442,14 @@ export default function Tasks() {
                       disabled={savingTaskId === task.id}
                     >
                       Save
+                    </button>
+                    <button
+                      className="button"
+                      type="button"
+                      onClick={() => handleDeleteTask(task)}
+                      disabled={savingTaskId === task.id}
+                    >
+                      Delete
                     </button>
                   </div>
                 </td>

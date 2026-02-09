@@ -5,6 +5,7 @@ import hashlib
 import json
 import os
 import secrets
+import shutil
 import sqlite3
 import uuid
 from datetime import datetime, timedelta
@@ -1532,6 +1533,32 @@ def write_network_mappings(rows: List[Dict[str, str]]) -> None:
             writer.writerow({"zip": zip_value, "network": dedup[zip_value]})
 
 
+def remove_upload_file(path_value: Optional[str]) -> None:
+    if not path_value:
+        return
+    try:
+        file_path = Path(path_value).expanduser().resolve()
+    except Exception:
+        return
+    try:
+        uploads_root = UPLOADS_DIR.resolve()
+    except Exception:
+        uploads_root = UPLOADS_DIR
+    if uploads_root not in file_path.parents:
+        return
+    try:
+        file_path.unlink(missing_ok=True)
+    except Exception:
+        return
+    parent = file_path.parent
+    while parent != uploads_root and uploads_root in parent.parents:
+        try:
+            parent.rmdir()
+        except OSError:
+            break
+        parent = parent.parent
+
+
 def _read_network_options_file() -> List[str]:
     if not NETWORK_OPTIONS_PATH.exists():
         return []
@@ -2779,6 +2806,87 @@ def delete_quote_upload(quote_id: str, upload_id: str) -> Dict[str, str]:
     return {"status": "deleted"}
 
 
+@app.delete("/api/quotes/{quote_id}")
+def delete_quote(quote_id: str, request: Request) -> Dict[str, str]:
+    files_to_remove: List[str] = []
+    installation_ids: List[str] = []
+
+    with get_db() as conn:
+        require_session_role(conn, request, {"admin"})
+        fetch_quote(conn, quote_id)
+        cur = conn.cursor()
+
+        cur.execute("SELECT path FROM Upload WHERE quote_id = ?", (quote_id,))
+        files_to_remove.extend(
+            [row["path"] for row in cur.fetchall() if row["path"]]
+        )
+
+        cur.execute("SELECT path FROM Proposal WHERE quote_id = ?", (quote_id,))
+        files_to_remove.extend(
+            [row["path"] for row in cur.fetchall() if row["path"]]
+        )
+
+        cur.execute(
+            "SELECT standardized_path FROM StandardizationRun WHERE quote_id = ?",
+            (quote_id,),
+        )
+        files_to_remove.extend(
+            [row["standardized_path"] for row in cur.fetchall() if row["standardized_path"]]
+        )
+
+        cur.execute("SELECT id FROM Installation WHERE quote_id = ?", (quote_id,))
+        installation_ids = [row["id"] for row in cur.fetchall()]
+
+        if installation_ids:
+            placeholders = ",".join(["?"] * len(installation_ids))
+            cur.execute(
+                f"SELECT path FROM InstallationDocument WHERE installation_id IN ({placeholders})",
+                installation_ids,
+            )
+            files_to_remove.extend(
+                [row["path"] for row in cur.fetchall() if row["path"]]
+            )
+            cur.execute(
+                f"DELETE FROM InstallationDocument WHERE installation_id IN ({placeholders})",
+                installation_ids,
+            )
+            cur.execute(
+                f"DELETE FROM Task WHERE installation_id IN ({placeholders})",
+                installation_ids,
+            )
+            cur.execute(
+                f"DELETE FROM Installation WHERE id IN ({placeholders})",
+                installation_ids,
+            )
+
+        cur.execute("DELETE FROM Upload WHERE quote_id = ?", (quote_id,))
+        cur.execute("DELETE FROM StandardizationRun WHERE quote_id = ?", (quote_id,))
+        cur.execute("DELETE FROM AssignmentRun WHERE quote_id = ?", (quote_id,))
+        cur.execute("DELETE FROM Proposal WHERE quote_id = ?", (quote_id,))
+        cur.execute("DELETE FROM Quote WHERE id = ?", (quote_id,))
+        conn.commit()
+
+    for path_value in files_to_remove:
+        remove_upload_file(path_value)
+
+    quote_dir = UPLOADS_DIR / quote_id
+    try:
+        if quote_dir.exists():
+            shutil.rmtree(quote_dir, ignore_errors=True)
+    except Exception:
+        pass
+
+    for installation_id in installation_ids:
+        install_dir = UPLOADS_DIR / f"installation-{installation_id}"
+        try:
+            if install_dir.exists():
+                shutil.rmtree(install_dir, ignore_errors=True)
+        except Exception:
+            pass
+
+    return {"status": "deleted"}
+
+
 @app.post("/api/quotes/{quote_id}/standardize", response_model=StandardizationOut)
 def run_standardization(
     quote_id: str, payload: Optional[StandardizationIn] = None
@@ -3441,6 +3549,24 @@ def update_task(
         updated = cur.fetchone()
 
     return TaskOut(**dict(updated))
+
+
+@app.delete("/api/tasks/{task_id}")
+def delete_task(task_id: str, request: Request) -> Dict[str, str]:
+    with get_db() as conn:
+        require_session_role(conn, request, {"admin"})
+        cur = conn.cursor()
+        cur.execute("SELECT * FROM Task WHERE id = ?", (task_id,))
+        task = cur.fetchone()
+        if not task:
+            raise HTTPException(status_code=404, detail="Task not found")
+        cur.execute("DELETE FROM Task WHERE id = ?", (task_id,))
+        cur.execute(
+            "UPDATE Installation SET updated_at = ? WHERE id = ?",
+            (now_iso(), task["installation_id"]),
+        )
+        conn.commit()
+    return {"status": "deleted"}
 
 
 @app.post("/api/installations/{installation_id}/documents", response_model=InstallationDocumentOut)

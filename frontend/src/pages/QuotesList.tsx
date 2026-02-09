@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import { Link } from "react-router-dom";
-import { getQuotes, getUsers, Quote } from "../api";
+import { deleteQuote, getQuotes, getUsers, Quote } from "../api";
 import { useAccess } from "../access";
 import { paginateItems, TablePagination } from "../components/TablePagination";
 import { formatNetworkLabel } from "../utils/formatNetwork";
@@ -58,6 +58,8 @@ function MultiSelectDropdown({ label, options, selected, onChange }: MultiSelect
 export default function QuotesList() {
   const [quotes, setQuotes] = useState<Quote[]>([]);
   const [error, setError] = useState<string | null>(null);
+  const [statusMessage, setStatusMessage] = useState<string | null>(null);
+  const [deletingQuoteId, setDeletingQuoteId] = useState<string | null>(null);
   const [userNameById, setUserNameById] = useState<Record<string, string>>({});
   const [statusFilters, setStatusFilters] = useState<string[]>([]);
   const [networkFilters, setNetworkFilters] = useState<string[]>([]);
@@ -70,6 +72,7 @@ export default function QuotesList() {
   const [page, setPage] = useState(1);
   const filtersRef = useRef<HTMLDivElement | null>(null);
   const { role, email } = useAccess();
+  const isAdmin = role === "admin";
 
   useEffect(() => {
     getQuotes({ role, email })
@@ -85,6 +88,25 @@ export default function QuotesList() {
       )
       .catch(() => setUserNameById({}));
   }, [role, email]);
+
+  const handleDeleteQuote = async (quote: Quote) => {
+    const confirmed = window.confirm(
+      `Delete quote "${quote.company}"? This removes related uploads, assignment history, and implementation data.`
+    );
+    if (!confirmed) return;
+    setDeletingQuoteId(quote.id);
+    setError(null);
+    setStatusMessage(null);
+    try {
+      await deleteQuote(quote.id);
+      setQuotes((prev) => prev.filter((item) => item.id !== quote.id));
+      setStatusMessage("Quote deleted.");
+    } catch (err: any) {
+      setError(err.message);
+    } finally {
+      setDeletingQuoteId(null);
+    }
+  };
 
   useEffect(() => {
     const handleOutsideClick = (event: MouseEvent) => {
@@ -188,6 +210,7 @@ export default function QuotesList() {
           New Quote
         </Link>
       </div>
+      {statusMessage && <div className="notice notice-success">{statusMessage}</div>}
       {error && <div className="notice">{error}</div>}
       <div ref={filtersRef} className="inline-actions" style={{ marginBottom: 12 }}>
         <MultiSelectDropdown
@@ -262,6 +285,7 @@ export default function QuotesList() {
             <th>Assigned To</th>
             <th>Status</th>
             <th>Network</th>
+            {isAdmin && <th>Actions</th>}
           </tr>
         </thead>
         <tbody>
@@ -294,11 +318,23 @@ export default function QuotesList() {
                   <span className="helper">{NO_NETWORK_LABEL}</span>
                 )}
               </td>
+              {isAdmin && (
+                <td>
+                  <button
+                    className="button"
+                    type="button"
+                    onClick={() => handleDeleteQuote(quote)}
+                    disabled={deletingQuoteId === quote.id}
+                  >
+                    Delete
+                  </button>
+                </td>
+              )}
             </tr>
           ))}
           {visibleQuotes.length === 0 && (
             <tr>
-              <td colSpan={6} className="helper">
+              <td colSpan={isAdmin ? 7 : 6} className="helper">
                 No quotes match current filters.
               </td>
             </tr>

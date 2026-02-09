@@ -322,6 +322,10 @@ export function updateQuote(id: string, payload: Partial<Quote>) {
   });
 }
 
+export function deleteQuote(id: string) {
+  return request<{ status: string }>(`/quotes/${id}`, { method: "DELETE" });
+}
+
 export async function uploadFile(id: string, file: File, uploadType: string) {
   const form = new FormData();
   form.append("type", uploadType);
@@ -591,6 +595,10 @@ export function assignUserTasks(id: string, taskIds: string[]) {
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify({ task_ids: taskIds }),
   });
+}
+
+export function deleteTask(taskId: string) {
+  return request<{ status: string }>(`/tasks/${taskId}`, { method: "DELETE" });
 }
 
 export function advanceTask(installationId: string, taskId: string) {
