@@ -212,6 +212,9 @@ export default function Configuration() {
   return (
     <section className="section">
       <h2>Configuration</h2>
+      <div className="helper" style={{ marginBottom: 8 }}>
+        Tables on this page are limited to 25 rows per page.
+      </div>
       {error && <div className="notice">{error}</div>}
       {statusMessage && (
         <div className={`notice notice-success ${statusMessageFading ? "fade-out" : ""}`}>
