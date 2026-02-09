@@ -220,6 +220,27 @@ a {
   padding: 8px 10px;
 }
 
+.table-pagination {
+  margin-top: 12px;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  flex-wrap: wrap;
+}
+
+.table-pagination-meta {
+  font-size: 12px;
+  color: #3f4d5e;
+}
+
+.table-pagination-controls {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  flex-wrap: wrap;
+}
+
 .table.elegant {
   border: 1px solid #3f4d5e;
   border-radius: 12px;

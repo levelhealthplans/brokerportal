@@ -10,6 +10,7 @@ import {
   assignOrganizationQuotes,
 } from "../api";
 import { useAccess } from "../access";
+import { paginateItems, TablePagination } from "../components/TablePagination";
 
 export default function Organizations() {
   const [orgs, setOrgs] = useState<Organization[]>([]);
@@ -31,6 +32,7 @@ export default function Organizations() {
   const [typeFilter, setTypeFilter] = useState<"all" | "broker" | "sponsor">("all");
   const [alphaSort, setAlphaSort] = useState<"asc" | "desc">("asc");
   const [createModalOpen, setCreateModalOpen] = useState(false);
+  const [page, setPage] = useState(1);
   const { role, email } = useAccess();
 
   const load = () => {
@@ -152,6 +154,17 @@ export default function Organizations() {
     return alphaSort === "asc" ? sorted : sorted.reverse();
   }, [orgs, typeFilter, alphaSort]);
 
+  const pagination = useMemo(
+    () => paginateItems(visibleOrgs, page),
+    [visibleOrgs, page]
+  );
+
+  useEffect(() => {
+    if (page !== pagination.currentPage) {
+      setPage(pagination.currentPage);
+    }
+  }, [page, pagination.currentPage]);
+
   return (
     <section className="section">
       <div className="inline-actions" style={{ justifyContent: "space-between", marginBottom: 8 }}>
@@ -244,7 +257,7 @@ export default function Organizations() {
           </tr>
         </thead>
         <tbody>
-          {visibleOrgs.map((org) => {
+          {pagination.pageItems.map((org) => {
             const isEditing = editingId === org.id;
             return (
               <tr key={org.id}>
@@ -342,6 +355,11 @@ export default function Organizations() {
           )}
         </tbody>
       </table>
+      <TablePagination
+        page={pagination.currentPage}
+        totalItems={visibleOrgs.length}
+        onPageChange={setPage}
+      />
 
       {assignOrgId && (
         <div className="section" style={{ marginTop: 20 }}>

@@ -1,4 +1,4 @@
-import { useEffect, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import {
   assignUserQuotes,
   assignUserTasks,
@@ -11,6 +11,7 @@ import {
   User,
 } from "../api";
 import { useAccess } from "../access";
+import { paginateItems, TablePagination } from "../components/TablePagination";
 import { useAutoDismissMessage } from "../hooks/useAutoDismissMessage";
 
 export default function Users() {
@@ -50,6 +51,7 @@ export default function Users() {
   const [passwordUser, setPasswordUser] = useState<User | null>(null);
   const [passwordDraft, setPasswordDraft] = useState("");
   const [passwordConfirm, setPasswordConfirm] = useState("");
+  const [page, setPage] = useState(1);
   const statusMessageFading = useAutoDismissMessage(statusMessage, setStatusMessage, 5000, 500);
 
   const load = () => {
@@ -260,6 +262,14 @@ export default function Users() {
     }
   };
 
+  const pagination = useMemo(() => paginateItems(users, page), [users, page]);
+
+  useEffect(() => {
+    if (page !== pagination.currentPage) {
+      setPage(pagination.currentPage);
+    }
+  }, [page, pagination.currentPage]);
+
   return (
     <section className="section">
       <div className="inline-actions" style={{ justifyContent: "space-between", marginBottom: 8 }}>
@@ -415,7 +425,7 @@ export default function Users() {
           </tr>
         </thead>
         <tbody>
-          {users.map((user) => {
+          {pagination.pageItems.map((user) => {
             const isEditing = editingId === user.id;
             return (
               <tr key={user.id}>
@@ -510,6 +520,11 @@ export default function Users() {
           )}
         </tbody>
       </table>
+      <TablePagination
+        page={pagination.currentPage}
+        totalItems={users.length}
+        onPageChange={setPage}
+      />
 
       {assignUserId && (
         <div className="section" style={{ marginTop: 20 }}>

@@ -1,4 +1,4 @@
-import { useEffect, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { Link, useParams } from "react-router-dom";
 import {
   getOrganization,
@@ -8,6 +8,7 @@ import {
   Organization,
   User,
 } from "../api";
+import { paginateItems, TablePagination } from "../components/TablePagination";
 
 export default function OrganizationDetail() {
   const { id } = useParams();
@@ -15,6 +16,7 @@ export default function OrganizationDetail() {
   const [organization, setOrganization] = useState<Organization | null>(null);
   const [users, setUsers] = useState<User[]>([]);
   const [error, setError] = useState<string | null>(null);
+  const [page, setPage] = useState(1);
 
   useEffect(() => {
     if (!organizationId) return;
@@ -61,6 +63,14 @@ export default function OrganizationDetail() {
     load();
   }, [organizationId]);
 
+  const pagination = useMemo(() => paginateItems(users, page), [users, page]);
+
+  useEffect(() => {
+    if (page !== pagination.currentPage) {
+      setPage(pagination.currentPage);
+    }
+  }, [page, pagination.currentPage]);
+
   if (!organization) {
     return <div className="section">{error ? error : "Loading organization..."}</div>;
   }
@@ -100,7 +110,7 @@ export default function OrganizationDetail() {
             </tr>
           </thead>
           <tbody>
-            {users.map((user) => (
+            {pagination.pageItems.map((user) => (
               <tr key={user.id}>
                 <td>{`${user.first_name} ${user.last_name}`.trim()}</td>
                 <td>{user.email}</td>
@@ -118,6 +128,11 @@ export default function OrganizationDetail() {
             )}
           </tbody>
         </table>
+        <TablePagination
+          page={pagination.currentPage}
+          totalItems={users.length}
+          onPageChange={setPage}
+        />
       </section>
     </section>
   );

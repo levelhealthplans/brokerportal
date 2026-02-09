@@ -1,4 +1,4 @@
-import { useEffect, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import {
   createNetworkMapping,
   createNetworkOption,
@@ -12,6 +12,7 @@ import {
   updateNetworkOption,
   updateNetworkSettings,
 } from "../api";
+import { paginateItems, TablePagination } from "../components/TablePagination";
 import { useAutoDismissMessage } from "../hooks/useAutoDismissMessage";
 import { formatNetworkLabel } from "../utils/formatNetwork";
 
@@ -31,6 +32,8 @@ export default function Configuration() {
   const [error, setError] = useState<string | null>(null);
   const [statusMessage, setStatusMessage] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
+  const [optionPage, setOptionPage] = useState(1);
+  const [mappingPage, setMappingPage] = useState(1);
   const statusMessageFading = useAutoDismissMessage(statusMessage, setStatusMessage, 5000, 500);
 
   const loadAll = () => {
@@ -181,6 +184,27 @@ export default function Configuration() {
     }
   };
 
+  const optionPagination = useMemo(
+    () => paginateItems(networkOptions, optionPage),
+    [networkOptions, optionPage]
+  );
+  const mappingPagination = useMemo(
+    () => paginateItems(networkMappings, mappingPage),
+    [networkMappings, mappingPage]
+  );
+
+  useEffect(() => {
+    if (optionPage !== optionPagination.currentPage) {
+      setOptionPage(optionPagination.currentPage);
+    }
+  }, [optionPage, optionPagination.currentPage]);
+
+  useEffect(() => {
+    if (mappingPage !== mappingPagination.currentPage) {
+      setMappingPage(mappingPagination.currentPage);
+    }
+  }, [mappingPage, mappingPagination.currentPage]);
+
   return (
     <section className="section">
       <h2>Configuration</h2>
@@ -257,7 +281,7 @@ export default function Configuration() {
             </tr>
           </thead>
           <tbody>
-            {networkOptions.map((option) => {
+            {optionPagination.pageItems.map((option) => {
               const isEditing = Object.prototype.hasOwnProperty.call(editingOption, option);
               return (
                 <tr key={option}>
@@ -323,6 +347,11 @@ export default function Configuration() {
             })}
           </tbody>
         </table>
+        <TablePagination
+          page={optionPagination.currentPage}
+          totalItems={networkOptions.length}
+          onPageChange={setOptionPage}
+        />
       </section>
 
       <section className="section" style={{ marginTop: 12 }}>
@@ -363,7 +392,7 @@ export default function Configuration() {
             </tr>
           </thead>
           <tbody>
-            {networkMappings.map((row) => {
+            {mappingPagination.pageItems.map((row) => {
               const isEditing = Boolean(editingMapping[row.zip]);
               const draft = editingMapping[row.zip] || row;
               return (
@@ -455,6 +484,11 @@ export default function Configuration() {
             )}
           </tbody>
         </table>
+        <TablePagination
+          page={mappingPagination.currentPage}
+          totalItems={networkMappings.length}
+          onPageChange={setMappingPage}
+        />
       </section>
     </section>
   );

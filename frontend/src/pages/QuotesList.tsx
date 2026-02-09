@@ -2,6 +2,7 @@ import { useEffect, useMemo, useRef, useState } from "react";
 import { Link } from "react-router-dom";
 import { getQuotes, getUsers, Quote } from "../api";
 import { useAccess } from "../access";
+import { paginateItems, TablePagination } from "../components/TablePagination";
 import { formatNetworkLabel } from "../utils/formatNetwork";
 import { getQuoteStageClass, getQuoteStageLabel } from "../utils/quoteStatus";
 
@@ -66,6 +67,7 @@ export default function QuotesList() {
     "effective_date"
   );
   const [sortDirection, setSortDirection] = useState<"asc" | "desc">("desc");
+  const [page, setPage] = useState(1);
   const filtersRef = useRef<HTMLDivElement | null>(null);
   const { role, email } = useAccess();
 
@@ -167,6 +169,17 @@ export default function QuotesList() {
     return sortDirection === "asc" ? sorted : sorted.reverse();
   }, [quotes, statusFilters, networkFilters, effectiveFrom, effectiveTo, sortBy, sortDirection]);
 
+  const pagination = useMemo(
+    () => paginateItems(visibleQuotes, page),
+    [visibleQuotes, page]
+  );
+
+  useEffect(() => {
+    if (page !== pagination.currentPage) {
+      setPage(pagination.currentPage);
+    }
+  }, [page, pagination.currentPage]);
+
   return (
     <section className="section">
       <div className="inline-actions" style={{ justifyContent: "space-between", marginBottom: 12 }}>
@@ -252,7 +265,7 @@ export default function QuotesList() {
           </tr>
         </thead>
         <tbody>
-          {visibleQuotes.map((quote) => (
+          {pagination.pageItems.map((quote) => (
             <tr key={quote.id}>
               <td>{quote.id.slice(0, 8)}</td>
               <td>
@@ -292,6 +305,11 @@ export default function QuotesList() {
           )}
         </tbody>
       </table>
+      <TablePagination
+        page={pagination.currentPage}
+        totalItems={visibleQuotes.length}
+        onPageChange={setPage}
+      />
     </section>
   );
 }

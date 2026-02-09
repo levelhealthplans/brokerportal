@@ -13,6 +13,7 @@ import {
   QuoteDetail as QuoteDetailType,
 } from "../api";
 import { useAccess } from "../access";
+import { paginateItems, TablePagination } from "../components/TablePagination";
 import { formatNetworkLabel } from "../utils/formatNetwork";
 import { getQuoteStageClass, getQuoteStageLabel } from "../utils/quoteStatus";
 import { useAutoDismissMessage } from "../hooks/useAutoDismissMessage";
@@ -58,6 +59,8 @@ export default function QuoteDetail() {
   const [manualNetworkDraft, setManualNetworkDraft] = useState("");
   const [networkOptions, setNetworkOptions] = useState<string[]>([]);
   const [proposalUrlDraft, setProposalUrlDraft] = useState("");
+  const [coveragePage, setCoveragePage] = useState(1);
+  const [wizardIssuesPage, setWizardIssuesPage] = useState(1);
   const statusMessageFading = useAutoDismissMessage(statusMessage, setStatusMessage, 5000, 500);
 
   const stageOptions = [
@@ -230,6 +233,33 @@ export default function QuoteDetail() {
     if (!data?.standardizations.length) return null;
     return data.standardizations[0];
   }, [data]);
+
+  const coverageRows = useMemo(
+    () => Object.entries(latestAssignment?.result_json.coverage_by_network || {}),
+    [latestAssignment]
+  );
+
+  const coveragePagination = useMemo(
+    () => paginateItems(coverageRows, coveragePage),
+    [coverageRows, coveragePage]
+  );
+
+  const wizardIssuesPagination = useMemo(
+    () => paginateItems(wizardIssues, wizardIssuesPage),
+    [wizardIssues, wizardIssuesPage]
+  );
+
+  useEffect(() => {
+    if (coveragePage !== coveragePagination.currentPage) {
+      setCoveragePage(coveragePagination.currentPage);
+    }
+  }, [coveragePage, coveragePagination.currentPage]);
+
+  useEffect(() => {
+    if (wizardIssuesPage !== wizardIssuesPagination.currentPage) {
+      setWizardIssuesPage(wizardIssuesPagination.currentPage);
+    }
+  }, [wizardIssuesPage, wizardIssuesPagination.currentPage]);
 
   const handleStageChange = async (nextStage: string) => {
     setStageDraft(nextStage);
@@ -907,9 +937,7 @@ export default function QuoteDetail() {
                       </tr>
                     </thead>
                     <tbody>
-                      {Object.entries(
-                        latestAssignment.result_json.coverage_by_network || {}
-                      ).map(([network, coverage]) => (
+                      {coveragePagination.pageItems.map(([network, coverage]) => (
                         <tr key={network}>
                           <td>{formatNetworkLabel(network)}</td>
                           <td>{Math.round(Number(coverage) * 100)}%</td>
@@ -917,6 +945,13 @@ export default function QuoteDetail() {
                       ))}
                     </tbody>
                   </table>
+                )}
+                {latestAssignment && (
+                  <TablePagination
+                    page={coveragePagination.currentPage}
+                    totalItems={coverageRows.length}
+                    onPageChange={setCoveragePage}
+                  />
                 )}
                 {latestAssignment.result_json.group_summary.invalid_rows?.length > 0 && (
                   <div className="notice" style={{ marginTop: 12 }}>
@@ -1227,89 +1262,99 @@ export default function QuoteDetail() {
                 </div>
               )}
               {wizardIssues.length > 0 && (
-                <table className="table elegant slim">
-                  <thead>
-                    <tr>
-                      <th>Row</th>
-                      <th>Field</th>
-                      <th>Value</th>
-                      <th>Mapped Value</th>
-                      <th>Issue</th>
-                    </tr>
-                  </thead>
-                  <tbody>
-                    {wizardIssues.map((issue, index) => (
-                      <tr key={`${issue.row}-${issue.field}-${index}`}>
-                        <td>
-                          <input
-                            type="number"
-                            value={issue.row}
-                            onChange={(e) => {
-                              const next = [...wizardIssues];
-                              next[index] = {
-                                ...issue,
-                                row: Number(e.target.value),
-                              };
-                              setWizardIssues(next);
-                            }}
-                          />
-                        </td>
-                        <td>
-                          <input
-                            value={issue.field}
-                            onChange={(e) => {
-                              const next = [...wizardIssues];
-                              next[index] = {
-                                ...issue,
-                                field: e.target.value,
-                              };
-                              setWizardIssues(next);
-                            }}
-                          />
-                        </td>
-                        <td>
-                          <input
-                            value={issue.value || ""}
-                            onChange={(e) => {
-                              const next = [...wizardIssues];
-                              next[index] = {
-                                ...issue,
-                                value: e.target.value,
-                              };
-                              setWizardIssues(next);
-                            }}
-                          />
-                        </td>
-                        <td>
-                          <input
-                            value={issue.mapped_value || ""}
-                            onChange={(e) => {
-                              const next = [...wizardIssues];
-                              next[index] = {
-                                ...issue,
-                                mapped_value: e.target.value,
-                              };
-                              setWizardIssues(next);
-                            }}
-                          />
-                        </td>
-                        <td>
-                          <input
-                            value={issue.issue}
-                            onChange={(e) => {
-                              const next = [...wizardIssues];
-                              next[index] = {
-                                ...issue,
-                                issue: e.target.value,
-                              };
-                              setWizardIssues(next);
-                            }}
-                          />
-                        </td>
+                <>
+                  <table className="table elegant slim">
+                    <thead>
+                      <tr>
+                        <th>Row</th>
+                        <th>Field</th>
+                        <th>Value</th>
+                        <th>Mapped Value</th>
+                        <th>Issue</th>
                       </tr>
-                    ))}
-                  </tbody>
-                </table>
+                    </thead>
+                    <tbody>
+                      {wizardIssuesPagination.pageItems.map((issue, index) => {
+                        const issueIndex = wizardIssuesPagination.startItem + index - 1;
+                        return (
+                          <tr key={`${issue.row}-${issue.field}-${issueIndex}`}>
+                            <td>
+                              <input
+                                type="number"
+                                value={issue.row}
+                                onChange={(e) => {
+                                  const next = [...wizardIssues];
+                                  next[issueIndex] = {
+                                    ...issue,
+                                    row: Number(e.target.value),
+                                  };
+                                  setWizardIssues(next);
+                                }}
+                              />
+                            </td>
+                            <td>
+                              <input
+                                value={issue.field}
+                                onChange={(e) => {
+                                  const next = [...wizardIssues];
+                                  next[issueIndex] = {
+                                    ...issue,
+                                    field: e.target.value,
+                                  };
+                                  setWizardIssues(next);
+                                }}
+                              />
+                            </td>
+                            <td>
+                              <input
+                                value={issue.value || ""}
+                                onChange={(e) => {
+                                  const next = [...wizardIssues];
+                                  next[issueIndex] = {
+                                    ...issue,
+                                    value: e.target.value,
+                                  };
+                                  setWizardIssues(next);
+                                }}
+                              />
+                            </td>
+                            <td>
+                              <input
+                                value={issue.mapped_value || ""}
+                                onChange={(e) => {
+                                  const next = [...wizardIssues];
+                                  next[issueIndex] = {
+                                    ...issue,
+                                    mapped_value: e.target.value,
+                                  };
+                                  setWizardIssues(next);
+                                }}
+                              />
+                            </td>
+                            <td>
+                              <input
+                                value={issue.issue}
+                                onChange={(e) => {
+                                  const next = [...wizardIssues];
+                                  next[issueIndex] = {
+                                    ...issue,
+                                    issue: e.target.value,
+                                  };
+                                  setWizardIssues(next);
+                                }}
+                              />
+                            </td>
+                          </tr>
+                        );
+                      })}
+                    </tbody>
+                  </table>
+                  <TablePagination
+                    page={wizardIssuesPagination.currentPage}
+                    totalItems={wizardIssues.length}
+                    onPageChange={setWizardIssuesPage}
+                  />
+                </>
               )}
             </section>
 

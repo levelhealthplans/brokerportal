@@ -1,4 +1,4 @@
-import { Fragment, useEffect, useState } from "react";
+import { Fragment, useEffect, useMemo, useState } from "react";
 import { Link } from "react-router-dom";
 import {
   getNetworkOptions,
@@ -9,6 +9,7 @@ import {
   updateQuote,
 } from "../api";
 import { useAccess } from "../access";
+import { paginateItems, TablePagination } from "../components/TablePagination";
 import { formatNetworkLabel } from "../utils/formatNetwork";
 
 type DetailState = {
@@ -26,6 +27,7 @@ export default function NetworkAssignments() {
   const [networkOptions, setNetworkOptions] = useState<string[]>([]);
   const [manualDraftByQuote, setManualDraftByQuote] = useState<Record<string, string>>({});
   const [savingManualByQuote, setSavingManualByQuote] = useState<Record<string, boolean>>({});
+  const [quotePage, setQuotePage] = useState(1);
 
   useEffect(() => {
     getQuotes({ role, email })
@@ -74,6 +76,14 @@ export default function NetworkAssignments() {
     }
   };
 
+  const quotePagination = useMemo(() => paginateItems(quotes, quotePage), [quotes, quotePage]);
+
+  useEffect(() => {
+    if (quotePage !== quotePagination.currentPage) {
+      setQuotePage(quotePagination.currentPage);
+    }
+  }, [quotePage, quotePagination.currentPage]);
+
   return (
     <section className="section">
       <h2>Network Assignment</h2>
@@ -90,7 +100,7 @@ export default function NetworkAssignments() {
           </tr>
         </thead>
         <tbody>
-          {quotes.map((quote) => {
+          {quotePagination.pageItems.map((quote) => {
             const isOpen = Boolean(expanded[quote.id]);
             const state = detailByQuote[quote.id];
             const latest = state?.detail?.assignments?.[0];
@@ -192,6 +202,11 @@ export default function NetworkAssignments() {
           )}
         </tbody>
       </table>
+      <TablePagination
+        page={quotePagination.currentPage}
+        totalItems={quotes.length}
+        onPageChange={setQuotePage}
+      />
     </section>
   );
 }
@@ -204,6 +219,52 @@ function AssignmentDetails({
   manualNetwork?: string | null;
 }) {
   const latest = detail.assignments?.[0];
+  const result = latest?.result_json || {};
+  const coverageByNetwork = result.coverage_by_network || {};
+  const memberAssignments = result.member_assignments || [];
+  const groupSummary = result.group_summary;
+  const rankedContracts = result.ranked_contracts || [];
+  const [coveragePage, setCoveragePage] = useState(1);
+  const [memberPage, setMemberPage] = useState(1);
+  const [rankedPage, setRankedPage] = useState(1);
+
+  const coverageRows = useMemo(
+    () =>
+      Object.entries(coverageByNetwork).sort(([, a], [, b]) => Number(b) - Number(a)),
+    [coverageByNetwork]
+  );
+
+  const coveragePagination = useMemo(
+    () => paginateItems(coverageRows, coveragePage),
+    [coverageRows, coveragePage]
+  );
+  const memberPagination = useMemo(
+    () => paginateItems(memberAssignments, memberPage),
+    [memberAssignments, memberPage]
+  );
+  const rankedPagination = useMemo(
+    () => paginateItems(rankedContracts, rankedPage),
+    [rankedContracts, rankedPage]
+  );
+
+  useEffect(() => {
+    if (coveragePage !== coveragePagination.currentPage) {
+      setCoveragePage(coveragePagination.currentPage);
+    }
+  }, [coveragePage, coveragePagination.currentPage]);
+
+  useEffect(() => {
+    if (memberPage !== memberPagination.currentPage) {
+      setMemberPage(memberPagination.currentPage);
+    }
+  }, [memberPage, memberPagination.currentPage]);
+
+  useEffect(() => {
+    if (rankedPage !== rankedPagination.currentPage) {
+      setRankedPage(rankedPagination.currentPage);
+    }
+  }, [rankedPage, rankedPagination.currentPage]);
+
   if (!latest) {
     if (manualNetwork) {
       return (
@@ -217,12 +278,6 @@ function AssignmentDetails({
       <div className="helper">A network will be automatically assigned based on the census.</div>
     );
   }
-
-  const result = latest.result_json || ({} as any);
-  const coverageByNetwork = result.coverage_by_network || {};
-  const memberAssignments = result.member_assignments || [];
-  const groupSummary = result.group_summary;
-  const rankedContracts = result.ranked_contracts || [];
 
   return (
     <div className="assignment-expand">
@@ -252,9 +307,7 @@ function AssignmentDetails({
               </tr>
             </thead>
             <tbody>
-              {Object.entries(coverageByNetwork)
-                .sort(([, a], [, b]) => Number(b) - Number(a))
-                .map(([network, coverage]) => (
+              {coveragePagination.pageItems.map(([network, coverage]) => (
                   <tr key={network}>
                     <td>{formatNetworkLabel(network)}</td>
                     <td>{Math.round(Number(coverage) * 100)}%</td>
@@ -262,6 +315,11 @@ function AssignmentDetails({
                 ))}
             </tbody>
           </table>
+          <TablePagination
+            page={coveragePagination.currentPage}
+            totalItems={coverageRows.length}
+            onPageChange={setCoveragePage}
+          />
         </>
       )}
 
@@ -279,7 +337,7 @@ function AssignmentDetails({
                 </tr>
               </thead>
               <tbody>
-                {memberAssignments.map((item: any) => (
+                {memberPagination.pageItems.map((item: any) => (
                   <tr key={`${item.row}-${item.zip}`}>
                     <td>{item.row}</td>
                     <td>{item.zip}</td>
@@ -290,6 +348,11 @@ function AssignmentDetails({
               </tbody>
             </table>
           </div>
+          <TablePagination
+            page={memberPagination.currentPage}
+            totalItems={memberAssignments.length}
+            onPageChange={setMemberPage}
+          />
         </>
       )}
 
@@ -304,8 +367,8 @@ function AssignmentDetails({
                 <th>Fit</th>
               </tr>
             </thead>
-            <tbody>
-              {rankedContracts.map((contract: any) => (
+              <tbody>
+              {rankedPagination.pageItems.map((contract: any) => (
                 <tr key={contract.name}>
                   <td>{formatNetworkLabel(contract.name)}</td>
                   <td>{contract.score}%</td>
@@ -314,6 +377,11 @@ function AssignmentDetails({
               ))}
             </tbody>
           </table>
+          <TablePagination
+            page={rankedPagination.currentPage}
+            totalItems={rankedContracts.length}
+            onPageChange={setRankedPage}
+          />
         </>
       )}
     </div>

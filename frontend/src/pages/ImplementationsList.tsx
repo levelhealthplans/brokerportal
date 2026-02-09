@@ -1,12 +1,14 @@
-import { useEffect, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { Link } from "react-router-dom";
 import { getInstallation, getInstallations, Installation } from "../api";
 import { useAccess } from "../access";
+import { paginateItems, TablePagination } from "../components/TablePagination";
 
 export default function ImplementationsList() {
   const [installations, setInstallations] = useState<Installation[]>([]);
   const [openTasks, setOpenTasks] = useState<Record<string, number>>({});
   const [error, setError] = useState<string | null>(null);
+  const [page, setPage] = useState(1);
   const { role, email } = useAccess();
 
   useEffect(() => {
@@ -30,6 +32,17 @@ export default function ImplementationsList() {
       .catch(() => setOpenTasks({}));
   }, [installations, role, email]);
 
+  const pagination = useMemo(
+    () => paginateItems(installations, page),
+    [installations, page]
+  );
+
+  useEffect(() => {
+    if (page !== pagination.currentPage) {
+      setPage(pagination.currentPage);
+    }
+  }, [page, pagination.currentPage]);
+
   return (
     <section className="section">
       <h2>Implementations</h2>
@@ -45,7 +58,7 @@ export default function ImplementationsList() {
           </tr>
         </thead>
         <tbody>
-          {installations.map((installation) => (
+          {pagination.pageItems.map((installation) => (
             <tr key={installation.id}>
               <td>{installation.id.slice(0, 8)}</td>
               <td>
@@ -73,6 +86,11 @@ export default function ImplementationsList() {
           )}
         </tbody>
       </table>
+      <TablePagination
+        page={pagination.currentPage}
+        totalItems={installations.length}
+        onPageChange={setPage}
+      />
     </section>
   );
 }

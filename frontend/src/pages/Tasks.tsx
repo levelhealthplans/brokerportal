@@ -2,6 +2,7 @@ import { useEffect, useMemo, useRef, useState } from "react";
 import { Link } from "react-router-dom";
 import { getTasks, getUsers, Task, User, updateTask } from "../api";
 import { useAccess } from "../access";
+import { paginateItems, TablePagination } from "../components/TablePagination";
 
 type MultiSelectDropdownProps = {
   label: string;
@@ -92,6 +93,7 @@ export default function Tasks() {
   const [companySearch, setCompanySearch] = useState("");
   const [sortBy, setSortBy] = useState<"due_date" | "state" | "owner" | "company">("due_date");
   const [sortDirection, setSortDirection] = useState<"asc" | "desc">("asc");
+  const [page, setPage] = useState(1);
   const filtersRef = useRef<HTMLDivElement | null>(null);
 
   const loadTasks = async () => {
@@ -242,6 +244,17 @@ export default function Tasks() {
     }).length;
   }, [tasks]);
 
+  const pagination = useMemo(
+    () => paginateItems(visibleTasks, page),
+    [visibleTasks, page]
+  );
+
+  useEffect(() => {
+    if (page !== pagination.currentPage) {
+      setPage(pagination.currentPage);
+    }
+  }, [page, pagination.currentPage]);
+
   return (
     <section className="section">
       <h2>Tasks</h2>
@@ -355,7 +368,7 @@ export default function Tasks() {
           </tr>
         </thead>
         <tbody>
-          {visibleTasks.map((task) => (
+          {pagination.pageItems.map((task) => (
             <tr key={task.id}>
               <td>{task.title}</td>
               <td>{task.installation_company || "—"}</td>
@@ -430,6 +443,11 @@ export default function Tasks() {
           )}
         </tbody>
       </table>
+      <TablePagination
+        page={pagination.currentPage}
+        totalItems={visibleTasks.length}
+        onPageChange={setPage}
+      />
     </section>
   );
 }
