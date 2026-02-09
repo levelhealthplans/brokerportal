@@ -240,6 +240,15 @@ export type NetworkSettings = {
   coverage_threshold: number;
 };
 
+export type CleanupUnassignedResult = {
+  status: string;
+  deleted_quote_count: number;
+  deleted_task_count: number;
+  deleted_task_count_from_quotes: number;
+  deleted_task_count_direct: number;
+  updated_installation_count: number;
+};
+
 const API_BASE = (import.meta.env.VITE_API_BASE || "/api").replace(/\/+$/, "");
 const REQUEST_TIMEOUT_MS = 15000;
 
@@ -484,6 +493,12 @@ export function updateNetworkSettings(payload: NetworkSettings) {
     method: "PUT",
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify(payload),
+  });
+}
+
+export function cleanupUnassignedRecords() {
+  return request<CleanupUnassignedResult>("/admin/cleanup-unassigned-records", {
+    method: "POST",
   });
 }
 

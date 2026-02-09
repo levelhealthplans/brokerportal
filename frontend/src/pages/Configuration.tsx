@@ -1,5 +1,6 @@
 import { useEffect, useMemo, useState } from "react";
 import {
+  cleanupUnassignedRecords,
   createNetworkMapping,
   createNetworkOption,
   deleteNetworkMapping,
@@ -188,6 +189,25 @@ export default function Configuration() {
     }
   };
 
+  const handleCleanupUnassigned = async () => {
+    const confirmed = window.confirm(
+      "Delete all quotes and tasks that are not assigned to a valid user? This cannot be undone."
+    );
+    if (!confirmed) return;
+    setBusy(true);
+    setError(null);
+    try {
+      const result = await cleanupUnassignedRecords();
+      setStatusMessage(
+        `Cleanup complete. Deleted ${result.deleted_quote_count} quotes and ${result.deleted_task_count} tasks.`
+      );
+    } catch (err: any) {
+      setError(err.message);
+    } finally {
+      setBusy(false);
+    }
+  };
+
   const optionPagination = useMemo(
     () => paginateItems(networkOptions, optionPage, TABLE_PAGE_SIZE),
     [networkOptions, optionPage]
@@ -262,6 +282,16 @@ export default function Configuration() {
             Save Settings
           </button>
         </div>
+      </section>
+
+      <section className="section" style={{ marginTop: 12 }}>
+        <h3>Data Cleanup</h3>
+        <div className="helper" style={{ marginBottom: 12 }}>
+          Permanently removes quotes and tasks with no assigned user (or an invalid assigned user).
+        </div>
+        <button className="button" type="button" onClick={handleCleanupUnassigned} disabled={busy}>
+          Delete Unassigned Quotes & Tasks
+        </button>
       </section>
 
       <section className="section" style={{ marginTop: 12 }}>

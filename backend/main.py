@@ -1559,6 +1559,97 @@ def remove_upload_file(path_value: Optional[str]) -> None:
         parent = parent.parent
 
 
+def delete_quote_with_dependencies(conn: sqlite3.Connection, quote_id: str) -> Dict[str, Any]:
+    cur = conn.cursor()
+    files_to_remove: List[str] = []
+    installation_ids: List[str] = []
+    deleted_task_count = 0
+
+    cur.execute("SELECT path FROM Upload WHERE quote_id = ?", (quote_id,))
+    files_to_remove.extend(
+        [row["path"] for row in cur.fetchall() if row["path"]]
+    )
+
+    cur.execute("SELECT path FROM Proposal WHERE quote_id = ?", (quote_id,))
+    files_to_remove.extend(
+        [row["path"] for row in cur.fetchall() if row["path"]]
+    )
+
+    cur.execute(
+        "SELECT standardized_path FROM StandardizationRun WHERE quote_id = ?",
+        (quote_id,),
+    )
+    files_to_remove.extend(
+        [row["standardized_path"] for row in cur.fetchall() if row["standardized_path"]]
+    )
+
+    cur.execute("SELECT id FROM Installation WHERE quote_id = ?", (quote_id,))
+    installation_ids = [row["id"] for row in cur.fetchall()]
+
+    if installation_ids:
+        placeholders = ",".join(["?"] * len(installation_ids))
+        cur.execute(
+            f"SELECT COUNT(*) AS cnt FROM Task WHERE installation_id IN ({placeholders})",
+            installation_ids,
+        )
+        deleted_task_count = int(cur.fetchone()["cnt"] or 0)
+        cur.execute(
+            f"SELECT path FROM InstallationDocument WHERE installation_id IN ({placeholders})",
+            installation_ids,
+        )
+        files_to_remove.extend(
+            [row["path"] for row in cur.fetchall() if row["path"]]
+        )
+        cur.execute(
+            f"DELETE FROM InstallationDocument WHERE installation_id IN ({placeholders})",
+            installation_ids,
+        )
+        cur.execute(
+            f"DELETE FROM Task WHERE installation_id IN ({placeholders})",
+            installation_ids,
+        )
+        cur.execute(
+            f"DELETE FROM Installation WHERE id IN ({placeholders})",
+            installation_ids,
+        )
+
+    cur.execute("DELETE FROM Upload WHERE quote_id = ?", (quote_id,))
+    cur.execute("DELETE FROM StandardizationRun WHERE quote_id = ?", (quote_id,))
+    cur.execute("DELETE FROM AssignmentRun WHERE quote_id = ?", (quote_id,))
+    cur.execute("DELETE FROM Proposal WHERE quote_id = ?", (quote_id,))
+    cur.execute("DELETE FROM Quote WHERE id = ?", (quote_id,))
+
+    return {
+        "files_to_remove": files_to_remove,
+        "installation_ids": installation_ids,
+        "deleted_task_count": deleted_task_count,
+    }
+
+
+def remove_quote_artifacts(
+    quote_id: str,
+    installation_ids: List[str],
+    files_to_remove: List[str],
+) -> None:
+    for path_value in files_to_remove:
+        remove_upload_file(path_value)
+
+    quote_dir = UPLOADS_DIR / quote_id
+    try:
+        if quote_dir.exists():
+            shutil.rmtree(quote_dir, ignore_errors=True)
+    except Exception:
+        pass
+
+    for installation_id in installation_ids:
+        install_dir = UPLOADS_DIR / f"installation-{installation_id}"
+        try:
+            if install_dir.exists():
+                shutil.rmtree(install_dir, ignore_errors=True)
+        except Exception:
+            pass
+
+
 def _read_network_options_file() -> List[str]:
     if not NETWORK_OPTIONS_PATH.exists():
         return []
@@ -2808,75 +2899,93 @@ def delete_quote_upload(quote_id: str, upload_id: str) -> Dict[str, str]:
 
 @app.delete("/api/quotes/{quote_id}")
 def delete_quote(quote_id: str, request: Request) -> Dict[str, str]:
-    files_to_remove: List[str] = []
-    installation_ids: List[str] = []
-
     with get_db() as conn:
         require_session_role(conn, request, {"admin"})
         fetch_quote(conn, quote_id)
-        cur = conn.cursor()
-
-        cur.execute("SELECT path FROM Upload WHERE quote_id = ?", (quote_id,))
-        files_to_remove.extend(
-            [row["path"] for row in cur.fetchall() if row["path"]]
-        )
-
-        cur.execute("SELECT path FROM Proposal WHERE quote_id = ?", (quote_id,))
-        files_to_remove.extend(
-            [row["path"] for row in cur.fetchall() if row["path"]]
-        )
-
-        cur.execute(
-            "SELECT standardized_path FROM StandardizationRun WHERE quote_id = ?",
-            (quote_id,),
-        )
-        files_to_remove.extend(
-            [row["standardized_path"] for row in cur.fetchall() if row["standardized_path"]]
-        )
-
-        cur.execute("SELECT id FROM Installation WHERE quote_id = ?", (quote_id,))
-        installation_ids = [row["id"] for row in cur.fetchall()]
-
-        if installation_ids:
-            placeholders = ",".join(["?"] * len(installation_ids))
-            cur.execute(
-                f"SELECT path FROM InstallationDocument WHERE installation_id IN ({placeholders})",
-                installation_ids,
-            )
-            files_to_remove.extend(
-                [row["path"] for row in cur.fetchall() if row["path"]]
-            )
-            cur.execute(
-                f"DELETE FROM InstallationDocument WHERE installation_id IN ({placeholders})",
-                installation_ids,
-            )
-            cur.execute(
-                f"DELETE FROM Task WHERE installation_id IN ({placeholders})",
-                installation_ids,
-            )
-            cur.execute(
-                f"DELETE FROM Installation WHERE id IN ({placeholders})",
-                installation_ids,
-            )
-
-        cur.execute("DELETE FROM Upload WHERE quote_id = ?", (quote_id,))
-        cur.execute("DELETE FROM StandardizationRun WHERE quote_id = ?", (quote_id,))
-        cur.execute("DELETE FROM AssignmentRun WHERE quote_id = ?", (quote_id,))
-        cur.execute("DELETE FROM Proposal WHERE quote_id = ?", (quote_id,))
-        cur.execute("DELETE FROM Quote WHERE id = ?", (quote_id,))
+        cleanup_result = delete_quote_with_dependencies(conn, quote_id)
         conn.commit()
 
-    for path_value in files_to_remove:
+    remove_quote_artifacts(
+        quote_id,
+        cleanup_result["installation_ids"],
+        cleanup_result["files_to_remove"],
+    )
+
+    return {"status": "deleted"}
+
+
+@app.post("/api/admin/cleanup-unassigned-records")
+def cleanup_unassigned_records(request: Request) -> Dict[str, Any]:
+    quote_ids: List[str] = []
+    installation_ids_to_remove: List[str] = []
+    files_to_remove: List[str] = []
+    task_installation_ids_to_touch: List[str] = []
+    deleted_task_count_from_quotes = 0
+    deleted_task_count_direct = 0
+
+    with get_db() as conn:
+        require_session_role(conn, request, {"admin"})
+        cur = conn.cursor()
+
+        cur.execute(
+            """
+            SELECT q.id
+            FROM Quote q
+            LEFT JOIN User u ON u.id = q.assigned_user_id
+            WHERE trim(COALESCE(q.assigned_user_id, '')) = '' OR u.id IS NULL
+            ORDER BY q.created_at DESC
+            """
+        )
+        quote_ids = [row["id"] for row in cur.fetchall()]
+
+        for quote_id in quote_ids:
+            cleanup_result = delete_quote_with_dependencies(conn, quote_id)
+            files_to_remove.extend(cleanup_result["files_to_remove"])
+            installation_ids_to_remove.extend(cleanup_result["installation_ids"])
+            deleted_task_count_from_quotes += int(cleanup_result["deleted_task_count"] or 0)
+
+        cur.execute(
+            """
+            SELECT t.id, t.installation_id
+            FROM Task t
+            LEFT JOIN User u ON u.id = t.assigned_user_id
+            WHERE trim(COALESCE(t.assigned_user_id, '')) = '' OR u.id IS NULL
+            """
+        )
+        task_rows = cur.fetchall()
+        task_ids = [row["id"] for row in task_rows]
+        task_installation_ids_to_touch = [
+            row["installation_id"] for row in task_rows if row["installation_id"]
+        ]
+        deleted_task_count_direct = len(task_ids)
+
+        if task_ids:
+            placeholders = ",".join(["?"] * len(task_ids))
+            cur.execute(f"DELETE FROM Task WHERE id IN ({placeholders})", task_ids)
+
+        if task_installation_ids_to_touch:
+            unique_installation_ids = sorted(set(task_installation_ids_to_touch))
+            placeholders = ",".join(["?"] * len(unique_installation_ids))
+            cur.execute(
+                f"UPDATE Installation SET updated_at = ? WHERE id IN ({placeholders})",
+                [now_iso(), *unique_installation_ids],
+            )
+            task_installation_ids_to_touch = unique_installation_ids
+
+        conn.commit()
+
+    for quote_id in dict.fromkeys(quote_ids):
+        quote_dir = UPLOADS_DIR / quote_id
+        try:
+            if quote_dir.exists():
+                shutil.rmtree(quote_dir, ignore_errors=True)
+        except Exception:
+            pass
+
+    for path_value in dict.fromkeys(files_to_remove):
         remove_upload_file(path_value)
 
-    quote_dir = UPLOADS_DIR / quote_id
-    try:
-        if quote_dir.exists():
-            shutil.rmtree(quote_dir, ignore_errors=True)
-    except Exception:
-        pass
-
-    for installation_id in installation_ids:
+    for installation_id in dict.fromkeys(installation_ids_to_remove):
         install_dir = UPLOADS_DIR / f"installation-{installation_id}"
         try:
             if install_dir.exists():
@@ -2884,7 +2993,14 @@ def delete_quote(quote_id: str, request: Request) -> Dict[str, str]:
         except Exception:
             pass
 
-    return {"status": "deleted"}
+    return {
+        "status": "cleaned",
+        "deleted_quote_count": len(quote_ids),
+        "deleted_task_count": deleted_task_count_from_quotes + deleted_task_count_direct,
+        "deleted_task_count_from_quotes": deleted_task_count_from_quotes,
+        "deleted_task_count_direct": deleted_task_count_direct,
+        "updated_installation_count": len(task_installation_ids_to_touch),
+    }
 
 
 @app.post("/api/quotes/{quote_id}/standardize", response_model=StandardizationOut)
