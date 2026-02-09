@@ -20,8 +20,8 @@ export type Quote = {
   high_cost_info: string;
   broker_first_name?: string | null;
   broker_last_name?: string | null;
-  broker_email: string;
-  broker_phone: string;
+  broker_email?: string | null;
+  broker_phone?: string | null;
   agent_of_record?: boolean | null;
   broker_org?: string | null;
   sponsor_domain?: string | null;
@@ -117,6 +117,28 @@ export type QuoteDetail = {
   standardizations: StandardizationRun[];
   assignments: AssignmentRun[];
   proposals: Proposal[];
+};
+
+export type QuoteCreatePayload = {
+  company: string;
+  employer_street?: string | null;
+  employer_city?: string | null;
+  state: string;
+  employer_zip?: string | null;
+  employer_domain?: string | null;
+  quote_deadline?: string | null;
+  employer_sic?: string | null;
+  effective_date: string;
+  current_enrolled: number;
+  current_eligible: number;
+  current_insurance_type: string;
+  employees_eligible: number;
+  expected_enrollees: number;
+  broker_fee_pepm: number;
+  include_specialty: boolean;
+  notes: string;
+  high_cost_info: string;
+  status?: string;
 };
 
 export type Installation = {
@@ -284,12 +306,7 @@ export function getQuote(id: string) {
   return request<QuoteDetail>(`/quotes/${id}`);
 }
 
-export function createQuote(
-  payload: Omit<
-    Quote,
-    "id" | "created_at" | "updated_at" | "version" | "needs_action"
-  > & { status?: string }
-) {
+export function createQuote(payload: QuoteCreatePayload) {
   return request<Quote>("/quotes", {
     method: "POST",
     headers: { "Content-Type": "application/json" },

@@ -167,6 +167,54 @@ class AdminPasswordAuthTests(unittest.TestCase):
         self.assertEqual(exc.exception.status_code, 400)
         self.assertIn("Email already exists", str(exc.exception.detail))
 
+    def test_create_quote_uses_signed_in_user_identity(self) -> None:
+        payload = main.QuoteCreate(
+            company="Session Bound Group",
+            employer_street="1 Main St",
+            employer_city="St. Louis",
+            state="MO",
+            employer_zip="63101",
+            employer_domain="group.example.com",
+            quote_deadline="2026-03-01",
+            employer_sic="1234",
+            effective_date="2026-04-01",
+            current_enrolled=10,
+            current_eligible=12,
+            current_insurance_type="Level Funded",
+            employees_eligible=12,
+            expected_enrollees=10,
+            broker_fee_pepm=35.0,
+            include_specialty=False,
+            notes="",
+            high_cost_info="",
+            broker_first_name="Ignored",
+            broker_last_name="Ignored",
+            broker_email="ignored@example.com",
+            broker_phone="555-9999",
+            agent_of_record=True,
+            broker_org="Ignored Org",
+            sponsor_domain="ignored.example.com",
+            status="Draft",
+        )
+        session_user = {
+            "id": "session-user-1",
+            "email": "jake@legacybrokerskc.com",
+            "role": "broker",
+            "first_name": "Jake",
+            "last_name": "Page",
+            "phone": "555-1111",
+            "organization": "Legacy Brokers KC",
+        }
+        with patch.object(main, "require_session_user", return_value=session_user):
+            quote = main.create_quote(payload, request=object())
+
+        self.assertEqual(quote.broker_email, "jake@legacybrokerskc.com")
+        self.assertEqual(quote.broker_first_name, "Jake")
+        self.assertEqual(quote.broker_last_name, "Page")
+        self.assertEqual(quote.broker_phone, "555-1111")
+        self.assertEqual(quote.assigned_user_id, "session-user-1")
+        self.assertEqual(quote.broker_org, "Legacy Brokers KC")
+
 
 if __name__ == "__main__":
     unittest.main()

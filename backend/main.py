@@ -836,8 +836,8 @@ class QuoteCreate(BaseModel):
     high_cost_info: str = ""
     broker_first_name: Optional[str] = None
     broker_last_name: Optional[str] = None
-    broker_email: str
-    broker_phone: str
+    broker_email: Optional[str] = None
+    broker_phone: Optional[str] = None
     agent_of_record: Optional[bool] = None
     broker_org: Optional[str] = None
     sponsor_domain: Optional[str] = None
@@ -2037,18 +2037,26 @@ def list_quotes(
 
 
 @app.post("/api/quotes", response_model=QuoteOut)
-def create_quote(payload: QuoteCreate) -> QuoteOut:
+def create_quote(payload: QuoteCreate, request: Request) -> QuoteOut:
     quote_id = str(uuid.uuid4())
     created_at = now_iso()
     status = payload.status or "Draft"
     with get_db() as conn:
-        domain = email_domain(payload.broker_email)
-        org = fetch_org_by_domain(conn, "broker", domain)
-        broker_org = payload.broker_org or (org["name"] if org else broker_org_from_email(payload.broker_email))
-        cur = conn.cursor()
-        sponsor_domain = payload.sponsor_domain or (
-            payload.employer_domain.lower() if payload.employer_domain else None
+        session_user = require_session_user(conn, request)
+        session_email = normalize_user_email(session_user["email"])
+        session_domain = email_domain(session_email)
+        session_role = (session_user["role"] or "").strip().lower()
+        org = fetch_org_by_domain(conn, "broker", session_domain)
+        broker_org = (
+            org["name"]
+            if org
+            else ((session_user["organization"] or "").strip() or broker_org_from_email(session_email))
         )
+        cur = conn.cursor()
+        normalized_employer_domain = payload.employer_domain.lower() if payload.employer_domain else None
+        sponsor_domain = (payload.sponsor_domain or normalized_employer_domain or "").strip().lower() or None
+        if session_role == "sponsor" and session_domain:
+            sponsor_domain = session_domain
         cur.execute(
             """
             INSERT INTO Quote (
@@ -2068,7 +2076,7 @@ def create_quote(payload: QuoteCreate) -> QuoteOut:
                 payload.employer_city,
                 payload.state,
                 payload.employer_zip,
-                payload.employer_domain.lower() if payload.employer_domain else None,
+                normalized_employer_domain,
                 payload.quote_deadline,
                 payload.employer_sic,
                 payload.effective_date,
@@ -2081,14 +2089,14 @@ def create_quote(payload: QuoteCreate) -> QuoteOut:
                 1 if payload.include_specialty else 0,
                 payload.notes,
                 payload.high_cost_info,
-                payload.broker_first_name,
-                payload.broker_last_name,
-                payload.broker_email,
-                payload.broker_phone,
+                (session_user["first_name"] or "").strip() or None,
+                (session_user["last_name"] or "").strip() or None,
+                session_email,
+                (session_user["phone"] or "").strip() or "",
                 1 if payload.agent_of_record else 0 if payload.agent_of_record is not None else None,
                 broker_org,
                 sponsor_domain,
-                payload.assigned_user_id,
+                session_user["id"],
                 payload.manual_network,
                 payload.proposal_url,
                 status,

@@ -1,9 +1,11 @@
 import { useMemo, useState } from "react";
 import { assignNetwork, createQuote, standardizeQuote, uploadFile } from "../api";
 import { useNavigate } from "react-router-dom";
+import { useAccess } from "../access";
 
 export default function NewQuote() {
   const navigate = useNavigate();
+  const { user } = useAccess();
   const [step, setStep] = useState<"info" | "uploads">("info");
   const [createdQuoteId, setCreatedQuoteId] = useState<string | null>(null);
   const [form, setForm] = useState({
@@ -19,12 +21,7 @@ export default function NewQuote() {
     current_enrolled: 0,
     current_eligible: 0,
     current_insurance_type: "",
-    broker_first_name: "",
-    broker_last_name: "",
-    broker_email: "",
-    broker_phone: "",
     broker_fee_pepm: 35,
-    agent_of_record: "",
     high_cost_info: "",
   });
   const [censusFiles, setCensusFiles] = useState<File[]>([]);
@@ -53,9 +50,6 @@ export default function NewQuote() {
     if (!form.current_eligible && form.current_eligible !== 0)
       required.push("Current Number Eligible");
     if (!form.current_insurance_type) required.push("Current Insurance Type");
-    if (!form.broker_email) required.push("Broker Email");
-    if (!form.broker_phone) required.push("Broker Phone");
-    if (!form.agent_of_record) required.push("Agent of Record");
     return required;
   }, [form]);
 
@@ -82,11 +76,6 @@ export default function NewQuote() {
           current_enrolled: Number(form.current_enrolled),
           current_eligible: Number(form.current_eligible),
           current_insurance_type: form.current_insurance_type,
-          broker_first_name: form.broker_first_name,
-          broker_last_name: form.broker_last_name,
-          broker_email: form.broker_email,
-          broker_phone: form.broker_phone,
-          agent_of_record: form.agent_of_record === "yes",
           high_cost_info: form.high_cost_info,
           status: "Draft",
         });
@@ -278,41 +267,6 @@ export default function NewQuote() {
                   <option value="Self Funded">Self Funded</option>
                 </select>
               </label>
-            </div>
-
-            <h3 style={{ marginTop: 24 }}>Broker Information</h3>
-            <div className="form-grid">
-              <label>
-                First name
-                <input
-                  value={form.broker_first_name}
-                  onChange={(e) => updateField("broker_first_name", e.target.value)}
-                />
-              </label>
-              <label>
-                Last name
-                <input
-                  value={form.broker_last_name}
-                  onChange={(e) => updateField("broker_last_name", e.target.value)}
-                />
-              </label>
-              <label>
-                Your Email*
-                <input
-                  type="email"
-                  value={form.broker_email}
-                  onChange={(e) => updateField("broker_email", e.target.value)}
-                  required
-                />
-              </label>
-              <label>
-                The Best Phone Number to Reach You*
-                <input
-                  value={form.broker_phone}
-                  onChange={(e) => updateField("broker_phone", e.target.value)}
-                  required
-                />
-              </label>
               <label>
                 Broker Fee (PEPM)*
                 <input
@@ -329,18 +283,16 @@ export default function NewQuote() {
                   Default is set to 35. This can be adjusted up or down.
                 </span>
               </label>
-              <label>
-                Are you the Agent Of Record?
-                <select
-                  value={form.agent_of_record}
-                  onChange={(e) => updateField("agent_of_record", e.target.value)}
-                  required
-                >
-                  <option value="">Please Select</option>
-                  <option value="yes">Yes</option>
-                  <option value="no">No</option>
-                </select>
-              </label>
+            </div>
+
+            <h3 style={{ marginTop: 24 }}>Signed-In User</h3>
+            <div className="kv">
+              <strong>Name</strong>
+              <span>{user ? `${user.first_name} ${user.last_name}` : "—"}</span>
+              <strong>Email</strong>
+              <span>{user?.email || "—"}</span>
+              <strong>Organization</strong>
+              <span>{user?.organization || "—"}</span>
             </div>
 
             <div className="helper" style={{ marginTop: 16 }}>
