@@ -106,6 +106,11 @@ HUBSPOT_OAUTH_AUTHORIZE_URL = "https://app.hubspot.com/oauth/authorize"
 HUBSPOT_OAUTH_TOKEN_URL = "https://api.hubapi.com/oauth/v1/token"
 HUBSPOT_OAUTH_STATE_MINUTES = 15
 HUBSPOT_OAUTH_DEFAULT_SCOPES = (
+    "oauth tickets "
+    "crm.objects.contacts.read crm.objects.contacts.write "
+    "crm.schemas.contacts.read crm.schemas.contacts.write "
+    "crm.objects.deals.read crm.objects.deals.write "
+    "crm.schemas.deals.read crm.schemas.deals.write "
     "crm.objects.tickets.read crm.objects.tickets.write crm.schemas.tickets.read"
 )
 
