@@ -81,6 +81,13 @@ export default function QuotesList() {
   const { role, email } = useAccess();
   const isAdmin = role === "admin";
 
+  const closeOpenFilterDropdowns = () => {
+    if (!filtersRef.current) return;
+    filtersRef.current
+      .querySelectorAll<HTMLDetailsElement>(".multi-dropdown[open]")
+      .forEach((el) => el.removeAttribute("open"));
+  };
+
   useEffect(() => {
     getQuotes({ role, email })
       .then(setQuotes)
@@ -127,9 +134,7 @@ export default function QuotesList() {
       ) {
         return;
       }
-      document
-        .querySelectorAll<HTMLDetailsElement>(".multi-dropdown[open]")
-        .forEach((el) => el.removeAttribute("open"));
+      closeOpenFilterDropdowns();
     };
     document.addEventListener("mousedown", handleOutsideClick);
     return () => document.removeEventListener("mousedown", handleOutsideClick);
@@ -307,9 +312,7 @@ export default function QuotesList() {
             setNetworkFilters([]);
             setEffectiveFrom("");
             setEffectiveTo("");
-            document
-              .querySelectorAll<HTMLDetailsElement>(".multi-dropdown[open]")
-              .forEach((el) => el.removeAttribute("open"));
+            closeOpenFilterDropdowns();
           }}
         >
           Clear filters

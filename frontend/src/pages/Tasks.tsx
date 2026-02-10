@@ -121,6 +121,13 @@ export default function Tasks() {
   const [page, setPage] = useState(1);
   const filtersRef = useRef<HTMLDivElement | null>(null);
 
+  const closeOpenFilterDropdowns = () => {
+    if (!filtersRef.current) return;
+    filtersRef.current
+      .querySelectorAll<HTMLDetailsElement>(".multi-dropdown[open]")
+      .forEach((el) => el.removeAttribute("open"));
+  };
+
   const loadTasks = async () => {
     setError(null);
     const rows = await getTasks({ role, email });
@@ -149,9 +156,7 @@ export default function Tasks() {
         (target && filtersRef.current.contains(target))
       )
         return;
-      document
-        .querySelectorAll<HTMLDetailsElement>(".multi-dropdown[open]")
-        .forEach((el) => el.removeAttribute("open"));
+      closeOpenFilterDropdowns();
     };
     document.addEventListener("mousedown", handleOutsideClick);
     return () => document.removeEventListener("mousedown", handleOutsideClick);
@@ -447,9 +452,7 @@ export default function Tasks() {
             setCompanySearch("");
             setSortBy("due_date");
             setSortDirection("asc");
-            document
-              .querySelectorAll<HTMLDetailsElement>(".multi-dropdown[open]")
-              .forEach((el) => el.removeAttribute("open"));
+            closeOpenFilterDropdowns();
           }}
         >
           Clear Filters
