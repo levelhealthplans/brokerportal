@@ -69,6 +69,8 @@ export default function QuoteDetail() {
   const [networkOptions, setNetworkOptions] = useState<string[]>([]);
   const [proposalUrlDraft, setProposalUrlDraft] = useState("");
   const [coveragePage, setCoveragePage] = useState(1);
+  const [memberPage, setMemberPage] = useState(1);
+  const [rankedPage, setRankedPage] = useState(1);
   const [wizardIssuesPage, setWizardIssuesPage] = useState(1);
   const statusMessageFading = useAutoDismissMessage(
     statusMessage,
@@ -310,13 +312,31 @@ export default function QuoteDetail() {
 
   const coverageRows = useMemo(
     () =>
-      Object.entries(latestAssignment?.result_json.coverage_by_network || {}),
+      Object.entries(latestAssignment?.result_json.coverage_by_network || {}).sort(
+        ([, a], [, b]) => Number(b) - Number(a),
+      ),
+    [latestAssignment],
+  );
+  const memberAssignments = useMemo(
+    () => latestAssignment?.result_json.member_assignments || [],
+    [latestAssignment],
+  );
+  const rankedContracts = useMemo(
+    () => latestAssignment?.result_json.ranked_contracts || [],
     [latestAssignment],
   );
 
   const coveragePagination = useMemo(
     () => paginateItems(coverageRows, coveragePage),
     [coverageRows, coveragePage],
+  );
+  const memberPagination = useMemo(
+    () => paginateItems(memberAssignments, memberPage),
+    [memberAssignments, memberPage],
+  );
+  const rankedPagination = useMemo(
+    () => paginateItems(rankedContracts, rankedPage),
+    [rankedContracts, rankedPage],
   );
 
   const wizardIssuesPagination = useMemo(
@@ -329,6 +349,18 @@ export default function QuoteDetail() {
       setCoveragePage(coveragePagination.currentPage);
     }
   }, [coveragePage, coveragePagination.currentPage]);
+
+  useEffect(() => {
+    if (memberPage !== memberPagination.currentPage) {
+      setMemberPage(memberPagination.currentPage);
+    }
+  }, [memberPage, memberPagination.currentPage]);
+
+  useEffect(() => {
+    if (rankedPage !== rankedPagination.currentPage) {
+      setRankedPage(rankedPagination.currentPage);
+    }
+  }, [rankedPage, rankedPagination.currentPage]);
 
   useEffect(() => {
     if (wizardIssuesPage !== wizardIssuesPagination.currentPage) {
@@ -1148,6 +1180,84 @@ export default function QuoteDetail() {
                         }{" "}
                         row(s) had invalid ZIPs and were excluded from coverage.
                       </div>
+                    )}
+                    {memberAssignments.length > 0 && (
+                      <details className="config-collapse" style={{ marginTop: 12 }}>
+                        <summary>
+                          ZIP &amp; Member Assignment Results ({memberAssignments.length})
+                        </summary>
+                        <div className="config-collapse-body">
+                          <div className="helper" style={{ marginBottom: 8 }}>
+                            Member-level ZIP mapping details used to calculate
+                            network coverage.
+                          </div>
+                          <div className="assignment-zip-scroll">
+                            <div className="table-scroll">
+                              <table className="table slim">
+                                <thead>
+                                  <tr>
+                                    <th>Row</th>
+                                    <th>ZIP</th>
+                                    <th>Assigned Network</th>
+                                    <th>Matched</th>
+                                  </tr>
+                                </thead>
+                                <tbody>
+                                  {memberPagination.pageItems.map((item: any) => (
+                                    <tr key={`${item.row}-${item.zip}`}>
+                                      <td>{item.row}</td>
+                                      <td>{item.zip}</td>
+                                      <td>
+                                        {formatNetworkLabel(item.assigned_network)}
+                                      </td>
+                                      <td>{item.matched ? "Yes" : "No"}</td>
+                                    </tr>
+                                  ))}
+                                </tbody>
+                              </table>
+                            </div>
+                          </div>
+                          <TablePagination
+                            page={memberPagination.currentPage}
+                            totalItems={memberAssignments.length}
+                            onPageChange={setMemberPage}
+                          />
+                        </div>
+                      </details>
+                    )}
+                    {rankedContracts.length > 0 && (
+                      <details className="config-collapse" style={{ marginTop: 12 }}>
+                        <summary>
+                          Ranked Networks ({rankedContracts.length})
+                        </summary>
+                        <div className="config-collapse-body">
+                          <div className="table-scroll">
+                            <table className="table slim">
+                              <thead>
+                                <tr>
+                                  <th>Network</th>
+                                  <th>Match Rate</th>
+                                  <th>Fit</th>
+                                </tr>
+                              </thead>
+                              <tbody>
+                                {rankedPagination.pageItems.map((contract: any) => (
+                                  <tr key={contract.name}>
+                                    <td>{formatNetworkLabel(contract.name)}</td>
+                                    <td>{contract.score}%</td>
+                                    <td>{contract.fit || "—"}</td>
+                                  </tr>
+                                ))}
+                              </tbody>
+                            </table>
+                          </div>
+                          <TablePagination
+                            page={rankedPagination.currentPage}
+                            totalItems={rankedContracts.length}
+                            onPageChange={setRankedPage}
+                          />
+                        </div>
+                      </details>
                     )}
                   </>
                 ) : (
