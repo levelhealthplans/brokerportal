@@ -1005,160 +1005,166 @@ export default function QuoteDetail() {
 
       <section className="section" id="assignment-output">
         <h2>Network</h2>
-        {role === "admin" && (
-          <div className="inline-actions" style={{ marginBottom: 12 }}>
-            <label style={{ minWidth: 320 }}>
-              Manual Network Override
-              <select
-                value={manualNetworkDraft}
-                onChange={(e) => setManualNetworkDraft(e.target.value)}
-              >
-                <option value="">None</option>
-                {manualOptions.map((network) => (
-                  <option key={network} value={network}>
-                    {formatNetworkLabel(network)}
-                  </option>
-                ))}
-              </select>
-            </label>
-            <button
-              className="button secondary"
-              type="button"
-              onClick={handleManualNetworkSave}
-              disabled={busy}
-            >
-              Save Override
-            </button>
-          </div>
-        )}
-        {latestAssignment || quote.manual_network ? (
-          <div>
-            <div className="kv">
-              <strong>Direct Contract / Primary Network</strong>
-              <span>
-                {quote.manual_network
-                  ? formatNetworkLabel(quote.manual_network)
-                  : latestAssignment?.result_json.group_summary
-                    ? formatNetworkLabel(
-                        latestAssignment.result_json.group_summary
-                          .primary_network,
-                      )
-                    : formatNetworkLabel(latestAssignment?.recommendation)}
-              </span>
-              <strong>
-                {latestAssignment?.result_json.group_summary
-                  ? "Coverage Rate"
-                  : "Match Rate"}
-              </strong>
-              <span>
-                {latestAssignment?.result_json.group_summary
-                  ? `${Math.round(
-                      latestAssignment.result_json.group_summary
-                        .coverage_percentage * 100,
-                    )}%`
-                  : latestAssignment
-                    ? `${Math.round(latestAssignment.confidence * 100)}%`
-                    : "—"}
-              </span>
-              <strong>Confidence</strong>
-              <span>
-                {latestAssignment
-                  ? `${Math.round(latestAssignment.confidence * 100)}%`
-                  : "—"}
-              </span>
-              <strong>Rationale</strong>
-              <span>
-                {quote.manual_network && !latestAssignment
-                  ? "Manual override set by admin."
-                  : latestAssignment?.rationale || "—"}
-              </span>
-            </div>
-            <div className="inline-actions" style={{ marginBottom: 12 }}>
-              <button
-                className="button secondary"
-                onClick={handleAssign}
-                disabled={busy}
-              >
-                Refresh Network Assignment
-              </button>
-            </div>
-            {latestAssignment?.result_json.group_summary ? (
-              <>
-                <div className="card-row">
-                  <div>
-                    <strong>Primary Network</strong>
-                    <div className="helper">
-                      {quote.manual_network
-                        ? `${formatNetworkLabel(quote.manual_network)} (manual override)`
-                        : formatNetworkLabel(
+        <details className="config-collapse" open>
+          <summary>Network Assignment</summary>
+          <div className="config-collapse-body">
+            {role === "admin" && (
+              <div className="inline-actions" style={{ marginBottom: 12 }}>
+                <label style={{ minWidth: 320 }}>
+                  Manual Network Override
+                  <select
+                    value={manualNetworkDraft}
+                    onChange={(e) => setManualNetworkDraft(e.target.value)}
+                  >
+                    <option value="">None</option>
+                    {manualOptions.map((network) => (
+                      <option key={network} value={network}>
+                        {formatNetworkLabel(network)}
+                      </option>
+                    ))}
+                  </select>
+                </label>
+                <button
+                  className="button secondary"
+                  type="button"
+                  onClick={handleManualNetworkSave}
+                  disabled={busy}
+                >
+                  Save Override
+                </button>
+              </div>
+            )}
+            {latestAssignment || quote.manual_network ? (
+              <div>
+                <div className="kv">
+                  <strong>Direct Contract / Primary Network</strong>
+                  <span>
+                    {quote.manual_network
+                      ? formatNetworkLabel(quote.manual_network)
+                      : latestAssignment?.result_json.group_summary
+                        ? formatNetworkLabel(
                             latestAssignment.result_json.group_summary
                               .primary_network,
-                          )}
-                    </div>
-                  </div>
-                  <div className="helper">
-                    Coverage:{" "}
-                    {Math.round(
-                      latestAssignment.result_json.group_summary
-                        .coverage_percentage * 100,
-                    )}
-                    % · Members counted:{" "}
-                    {latestAssignment.result_json.group_summary.total_members}
-                  </div>
+                          )
+                        : formatNetworkLabel(latestAssignment?.recommendation)}
+                  </span>
+                  <strong>
+                    {latestAssignment?.result_json.group_summary
+                      ? "Coverage Rate"
+                      : "Match Rate"}
+                  </strong>
+                  <span>
+                    {latestAssignment?.result_json.group_summary
+                      ? `${Math.round(
+                          latestAssignment.result_json.group_summary
+                            .coverage_percentage * 100,
+                        )}%`
+                      : latestAssignment
+                        ? `${Math.round(latestAssignment.confidence * 100)}%`
+                        : "—"}
+                  </span>
+                  <strong>Confidence</strong>
+                  <span>
+                    {latestAssignment
+                      ? `${Math.round(latestAssignment.confidence * 100)}%`
+                      : "—"}
+                  </span>
+                  <strong>Rationale</strong>
+                  <span>
+                    {quote.manual_network && !latestAssignment
+                      ? "Manual override set by admin."
+                      : latestAssignment?.rationale || "—"}
+                  </span>
                 </div>
-                {latestAssignment && (
-                  <div className="table-scroll">
-                    <table className="table">
-                      <thead>
-                        <tr>
-                          <th>Network</th>
-                          <th>Coverage</th>
-                        </tr>
-                      </thead>
-                      <tbody>
-                        {coveragePagination.pageItems.map(
-                          ([network, coverage]) => (
-                            <tr key={network}>
-                              <td>{formatNetworkLabel(network)}</td>
-                              <td>{Math.round(Number(coverage) * 100)}%</td>
-                            </tr>
-                          ),
+                <div className="inline-actions" style={{ marginBottom: 12 }}>
+                  <button
+                    className="button secondary"
+                    onClick={handleAssign}
+                    disabled={busy}
+                  >
+                    Refresh Network Assignment
+                  </button>
+                </div>
+                {latestAssignment?.result_json.group_summary ? (
+                  <>
+                    <div className="card-row">
+                      <div>
+                        <strong>Primary Network</strong>
+                        <div className="helper">
+                          {quote.manual_network
+                            ? `${formatNetworkLabel(quote.manual_network)} (manual override)`
+                            : formatNetworkLabel(
+                                latestAssignment.result_json.group_summary
+                                  .primary_network,
+                              )}
+                        </div>
+                      </div>
+                      <div className="helper">
+                        Coverage:{" "}
+                        {Math.round(
+                          latestAssignment.result_json.group_summary
+                            .coverage_percentage * 100,
                         )}
-                      </tbody>
-                    </table>
-                  </div>
-                )}
-                {latestAssignment && (
-                  <TablePagination
-                    page={coveragePagination.currentPage}
-                    totalItems={coverageRows.length}
-                    onPageChange={setCoveragePage}
-                  />
-                )}
-                {latestAssignment.result_json.group_summary.invalid_rows
-                  ?.length > 0 && (
+                        % · Members counted:{" "}
+                        {latestAssignment.result_json.group_summary
+                          .total_members}
+                      </div>
+                    </div>
+                    {latestAssignment && (
+                      <div className="table-scroll">
+                        <table className="table">
+                          <thead>
+                            <tr>
+                              <th>Network</th>
+                              <th>Coverage</th>
+                            </tr>
+                          </thead>
+                          <tbody>
+                            {coveragePagination.pageItems.map(
+                              ([network, coverage]) => (
+                                <tr key={network}>
+                                  <td>{formatNetworkLabel(network)}</td>
+                                  <td>{Math.round(Number(coverage) * 100)}%</td>
+                                </tr>
+                              ),
+                            )}
+                          </tbody>
+                        </table>
+                      </div>
+                    )}
+                    {latestAssignment && (
+                      <TablePagination
+                        page={coveragePagination.currentPage}
+                        totalItems={coverageRows.length}
+                        onPageChange={setCoveragePage}
+                      />
+                    )}
+                    {latestAssignment.result_json.group_summary.invalid_rows
+                      ?.length > 0 && (
+                      <div className="notice" style={{ marginTop: 12 }}>
+                        {
+                          latestAssignment.result_json.group_summary.invalid_rows
+                            .length
+                        }{" "}
+                        row(s) had invalid ZIPs and were excluded from coverage.
+                      </div>
+                    )}
+                  </>
+                ) : (
                   <div className="notice" style={{ marginTop: 12 }}>
-                    {
-                      latestAssignment.result_json.group_summary.invalid_rows
-                        .length
-                    }{" "}
-                    row(s) had invalid ZIPs and were excluded from coverage.
+                    {quote.manual_network
+                      ? "Manual network override is active. Re-run assignment or upload a new census to replace it."
+                      : "This quote has an older assignment format. Re-run assignment to see the latest network summary."}
                   </div>
                 )}
-              </>
+              </div>
             ) : (
-              <div className="notice" style={{ marginTop: 12 }}>
-                {quote.manual_network
-                  ? "Manual network override is active. Re-run assignment or upload a new census to replace it."
-                  : "This quote has an older assignment format. Re-run assignment to see the latest network summary."}
+              <div className="helper">
+                A network will be automatically assigned based on the census.
               </div>
             )}
           </div>
-        ) : (
-          <div className="helper">
-            A network will be automatically assigned based on the census.
-          </div>
-        )}
+        </details>
       </section>
 
       <section className="section">

@@ -6,7 +6,6 @@ import NewQuote from "./pages/NewQuote";
 import QuoteDetail from "./pages/QuoteDetail";
 import ImplementationsList from "./pages/ImplementationsList";
 import ImplementationDetail from "./pages/ImplementationDetail";
-import NetworkAssignments from "./pages/NetworkAssignments";
 import Organizations from "./pages/Organizations";
 import OrganizationDetail from "./pages/OrganizationDetail";
 import Configuration from "./pages/Configuration";
@@ -39,12 +38,6 @@ function AppShell() {
             className={({ isActive }) => `side-link${isActive ? " active" : ""}`}
           >
             Implementation
-          </NavLink>
-          <NavLink
-            to="/network-assignment"
-            className={({ isActive }) => `side-link${isActive ? " active" : ""}`}
-          >
-            Network Assignment
           </NavLink>
           {role === "admin" && (
             <NavLink
@@ -96,7 +89,7 @@ function AppShell() {
             <Route path="/quotes/:id" element={<QuoteDetail />} />
             <Route path="/implementations" element={<ImplementationsList />} />
             <Route path="/implementations/:id" element={<ImplementationDetail />} />
-            <Route path="/network-assignment" element={<NetworkAssignments />} />
+            <Route path="/network-assignment" element={<Navigate to="/quotes" replace />} />
             <Route path="/admin/configuration" element={<Configuration />} />
             <Route path="/admin/organizations" element={<Organizations />} />
             <Route path="/admin/organizations/:id" element={<OrganizationDetail />} />
