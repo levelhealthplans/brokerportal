@@ -124,6 +124,9 @@ export default function Configuration() {
   const [error, setError] = useState<string | null>(null);
   const [statusMessage, setStatusMessage] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
+  const [networkConfigTab, setNetworkConfigTab] = useState<"assignment" | "options" | "mappings">(
+    "assignment"
+  );
   const [optionPage, setOptionPage] = useState(1);
   const [mappingPage, setMappingPage] = useState(1);
   const statusMessageFading = useAutoDismissMessage(statusMessage, setStatusMessage, 5000, 500);
@@ -606,45 +609,317 @@ export default function Configuration() {
       )}
 
       <section className="section" style={{ marginTop: 12 }}>
-        <h3>Assignment Settings</h3>
-        <div className="inline-actions">
-          <label style={{ minWidth: 260 }}>
-            Default Network
-            <select
-              value={settings.default_network}
-              onChange={(e) =>
-                setSettings((prev) => ({ ...prev, default_network: e.target.value }))
-              }
-            >
-              {networkOptions.map((option) => (
-                <option key={option} value={option}>
-                  {formatNetworkLabel(option)}
-                </option>
-              ))}
-            </select>
-          </label>
-          <label style={{ minWidth: 260 }}>
-            Coverage Threshold (%)
-            <input
-              type="number"
-              min={0}
-              max={100}
-              value={Math.round(settings.coverage_threshold * 100)}
-              onChange={(e) =>
-                setSettings((prev) => ({
-                  ...prev,
-                  coverage_threshold: Math.max(
-                    0,
-                    Math.min(1, Number(e.target.value || 0) / 100)
-                  ),
-                }))
-              }
-            />
-          </label>
-          <button className="button secondary" type="button" onClick={handleSaveSettings} disabled={busy}>
-            Save Settings
+        <h3>Network Configuration</h3>
+        <div className="helper" style={{ marginBottom: 12 }}>
+          Configure assignment defaults, network options, and ZIP mappings in one place.
+        </div>
+        <div className="inline-actions" style={{ marginBottom: 12 }}>
+          <button
+            className={networkConfigTab === "assignment" ? "button secondary" : "button ghost"}
+            type="button"
+            onClick={() => setNetworkConfigTab("assignment")}
+          >
+            Assignment Settings
+          </button>
+          <button
+            className={networkConfigTab === "options" ? "button secondary" : "button ghost"}
+            type="button"
+            onClick={() => setNetworkConfigTab("options")}
+          >
+            Network Options
+          </button>
+          <button
+            className={networkConfigTab === "mappings" ? "button secondary" : "button ghost"}
+            type="button"
+            onClick={() => setNetworkConfigTab("mappings")}
+          >
+            ZIP-to-Network Mappings
           </button>
         </div>
+
+        {networkConfigTab === "assignment" && (
+          <div className="inline-actions">
+            <label style={{ minWidth: 260 }}>
+              Default Network
+              <select
+                value={settings.default_network}
+                onChange={(e) =>
+                  setSettings((prev) => ({ ...prev, default_network: e.target.value }))
+                }
+              >
+                {networkOptions.map((option) => (
+                  <option key={option} value={option}>
+                    {formatNetworkLabel(option)}
+                  </option>
+                ))}
+              </select>
+            </label>
+            <label style={{ minWidth: 260 }}>
+              Coverage Threshold (%)
+              <input
+                type="number"
+                min={0}
+                max={100}
+                value={Math.round(settings.coverage_threshold * 100)}
+                onChange={(e) =>
+                  setSettings((prev) => ({
+                    ...prev,
+                    coverage_threshold: Math.max(
+                      0,
+                      Math.min(1, Number(e.target.value || 0) / 100)
+                    ),
+                  }))
+                }
+              />
+            </label>
+            <button
+              className="button secondary"
+              type="button"
+              onClick={handleSaveSettings}
+              disabled={busy}
+            >
+              Save Settings
+            </button>
+          </div>
+        )}
+
+        {networkConfigTab === "options" && (
+          <>
+            <div className="inline-actions" style={{ marginBottom: 12 }}>
+              <label style={{ minWidth: 320 }}>
+                New Network Option
+                <input
+                  value={newOption}
+                  onChange={(e) => setNewOption(e.target.value)}
+                  placeholder="Example_Network"
+                />
+              </label>
+              <button className="button secondary" type="button" onClick={handleAddOption} disabled={busy}>
+                Add Option
+              </button>
+            </div>
+            <table className="table">
+              <thead>
+                <tr>
+                  <th>Value</th>
+                  <th>Display</th>
+                  <th>Actions</th>
+                </tr>
+              </thead>
+              <tbody>
+                {optionPagination.pageItems.map((option) => {
+                  const isEditing = Object.prototype.hasOwnProperty.call(editingOption, option);
+                  return (
+                    <tr key={option}>
+                      <td>
+                        {isEditing ? (
+                          <input
+                            value={editingOption[option]}
+                            onChange={(e) =>
+                              setEditingOption((prev) => ({ ...prev, [option]: e.target.value }))
+                            }
+                          />
+                        ) : (
+                          option
+                        )}
+                      </td>
+                      <td>{formatNetworkLabel(option)}</td>
+                      <td>
+                        <div className="inline-actions">
+                          {isEditing ? (
+                            <>
+                              <button className="button secondary" type="button" onClick={() => handleSaveOption(option)} disabled={busy}>
+                                Save
+                              </button>
+                              <button
+                                className="button ghost"
+                                type="button"
+                                onClick={() =>
+                                  setEditingOption((prev) => {
+                                    const copy = { ...prev };
+                                    delete copy[option];
+                                    return copy;
+                                  })
+                                }
+                              >
+                                Cancel
+                              </button>
+                            </>
+                          ) : (
+                            <>
+                              <button
+                                className="button ghost"
+                                type="button"
+                                onClick={() =>
+                                  setEditingOption((prev) => ({ ...prev, [option]: option }))
+                                }
+                              >
+                                Edit
+                              </button>
+                              <button
+                                className="button"
+                                type="button"
+                                onClick={() => handleDeleteOption(option)}
+                                disabled={busy || option === "Cigna_PPO"}
+                              >
+                                Delete
+                              </button>
+                            </>
+                          )}
+                        </div>
+                      </td>
+                    </tr>
+                  );
+                })}
+              </tbody>
+            </table>
+            <TablePagination
+              page={optionPagination.currentPage}
+              totalItems={networkOptions.length}
+              pageSize={TABLE_PAGE_SIZE}
+              onPageChange={setOptionPage}
+            />
+          </>
+        )}
+
+        {networkConfigTab === "mappings" && (
+          <>
+            <div className="inline-actions" style={{ marginBottom: 12 }}>
+              <label>
+                ZIP
+                <input
+                  value={newMapping.zip}
+                  onChange={(e) => setNewMapping((prev) => ({ ...prev, zip: e.target.value }))}
+                  placeholder="63011"
+                />
+              </label>
+              <label style={{ minWidth: 260 }}>
+                Network
+                <select
+                  value={newMapping.network}
+                  onChange={(e) => setNewMapping((prev) => ({ ...prev, network: e.target.value }))}
+                >
+                  {networkOptions.map((option) => (
+                    <option key={option} value={option}>
+                      {formatNetworkLabel(option)}
+                    </option>
+                  ))}
+                </select>
+              </label>
+              <button className="button secondary" type="button" onClick={handleAddMapping} disabled={busy}>
+                Add Mapping
+              </button>
+            </div>
+
+            <table className="table">
+              <thead>
+                <tr>
+                  <th>ZIP</th>
+                  <th>Network</th>
+                  <th>Actions</th>
+                </tr>
+              </thead>
+              <tbody>
+                {mappingPagination.pageItems.map((row) => {
+                  const isEditing = Boolean(editingMapping[row.zip]);
+                  const draft = editingMapping[row.zip] || row;
+                  return (
+                    <tr key={row.zip}>
+                      <td>
+                        {isEditing ? (
+                          <input
+                            value={draft.zip}
+                            onChange={(e) =>
+                              setEditingMapping((prev) => ({
+                                ...prev,
+                                [row.zip]: { ...draft, zip: e.target.value },
+                              }))
+                            }
+                          />
+                        ) : (
+                          row.zip
+                        )}
+                      </td>
+                      <td>
+                        {isEditing ? (
+                          <select
+                            value={draft.network}
+                            onChange={(e) =>
+                              setEditingMapping((prev) => ({
+                                ...prev,
+                                [row.zip]: { ...draft, network: e.target.value },
+                              }))
+                            }
+                          >
+                            {networkOptions.map((option) => (
+                              <option key={option} value={option}>
+                                {formatNetworkLabel(option)}
+                              </option>
+                            ))}
+                          </select>
+                        ) : (
+                          formatNetworkLabel(row.network)
+                        )}
+                      </td>
+                      <td>
+                        <div className="inline-actions">
+                          {isEditing ? (
+                            <>
+                              <button className="button secondary" type="button" onClick={() => handleSaveMapping(row.zip)} disabled={busy}>
+                                Save
+                              </button>
+                              <button
+                                className="button ghost"
+                                type="button"
+                                onClick={() =>
+                                  setEditingMapping((prev) => {
+                                    const copy = { ...prev };
+                                    delete copy[row.zip];
+                                    return copy;
+                                  })
+                                }
+                              >
+                                Cancel
+                              </button>
+                            </>
+                          ) : (
+                            <>
+                              <button
+                                className="button ghost"
+                                type="button"
+                                onClick={() =>
+                                  setEditingMapping((prev) => ({ ...prev, [row.zip]: { ...row } }))
+                                }
+                              >
+                                Edit
+                              </button>
+                              <button className="button" type="button" onClick={() => handleDeleteMapping(row.zip)} disabled={busy}>
+                                Delete
+                              </button>
+                            </>
+                          )}
+                        </div>
+                      </td>
+                    </tr>
+                  );
+                })}
+                {networkMappings.length === 0 && (
+                  <tr>
+                    <td colSpan={3} className="helper">
+                      No ZIP mappings configured yet.
+                    </td>
+                  </tr>
+                )}
+              </tbody>
+            </table>
+            <TablePagination
+              page={mappingPagination.currentPage}
+              totalItems={networkMappings.length}
+              pageSize={TABLE_PAGE_SIZE}
+              onPageChange={setMappingPage}
+            />
+          </>
+        )}
       </section>
 
       <section className="section" style={{ marginTop: 12 }}>
@@ -1042,241 +1317,6 @@ export default function Configuration() {
         </button>
       </section>
 
-      <section className="section" style={{ marginTop: 12 }}>
-        <h3>Network Options</h3>
-        <div className="inline-actions" style={{ marginBottom: 12 }}>
-          <label style={{ minWidth: 320 }}>
-            New Network Option
-            <input
-              value={newOption}
-              onChange={(e) => setNewOption(e.target.value)}
-              placeholder="Example_Network"
-            />
-          </label>
-          <button className="button secondary" type="button" onClick={handleAddOption} disabled={busy}>
-            Add Option
-          </button>
-        </div>
-        <table className="table">
-          <thead>
-            <tr>
-              <th>Value</th>
-              <th>Display</th>
-              <th>Actions</th>
-            </tr>
-          </thead>
-          <tbody>
-            {optionPagination.pageItems.map((option) => {
-              const isEditing = Object.prototype.hasOwnProperty.call(editingOption, option);
-              return (
-                <tr key={option}>
-                  <td>
-                    {isEditing ? (
-                      <input
-                        value={editingOption[option]}
-                        onChange={(e) =>
-                          setEditingOption((prev) => ({ ...prev, [option]: e.target.value }))
-                        }
-                      />
-                    ) : (
-                      option
-                    )}
-                  </td>
-                  <td>{formatNetworkLabel(option)}</td>
-                  <td>
-                    <div className="inline-actions">
-                      {isEditing ? (
-                        <>
-                          <button className="button secondary" type="button" onClick={() => handleSaveOption(option)} disabled={busy}>
-                            Save
-                          </button>
-                          <button
-                            className="button ghost"
-                            type="button"
-                            onClick={() =>
-                              setEditingOption((prev) => {
-                                const copy = { ...prev };
-                                delete copy[option];
-                                return copy;
-                              })
-                            }
-                          >
-                            Cancel
-                          </button>
-                        </>
-                      ) : (
-                        <>
-                          <button
-                            className="button ghost"
-                            type="button"
-                            onClick={() =>
-                              setEditingOption((prev) => ({ ...prev, [option]: option }))
-                            }
-                          >
-                            Edit
-                          </button>
-                          <button
-                            className="button"
-                            type="button"
-                            onClick={() => handleDeleteOption(option)}
-                            disabled={busy || option === "Cigna_PPO"}
-                          >
-                            Delete
-                          </button>
-                        </>
-                      )}
-                    </div>
-                  </td>
-                </tr>
-              );
-            })}
-          </tbody>
-        </table>
-        <TablePagination
-          page={optionPagination.currentPage}
-          totalItems={networkOptions.length}
-          pageSize={TABLE_PAGE_SIZE}
-          onPageChange={setOptionPage}
-        />
-      </section>
-
-      <section className="section" style={{ marginTop: 12 }}>
-        <h3>ZIP-to-Network Mappings</h3>
-        <div className="inline-actions" style={{ marginBottom: 12 }}>
-          <label>
-            ZIP
-            <input
-              value={newMapping.zip}
-              onChange={(e) => setNewMapping((prev) => ({ ...prev, zip: e.target.value }))}
-              placeholder="63011"
-            />
-          </label>
-          <label style={{ minWidth: 260 }}>
-            Network
-            <select
-              value={newMapping.network}
-              onChange={(e) => setNewMapping((prev) => ({ ...prev, network: e.target.value }))}
-            >
-              {networkOptions.map((option) => (
-                <option key={option} value={option}>
-                  {formatNetworkLabel(option)}
-                </option>
-              ))}
-            </select>
-          </label>
-          <button className="button secondary" type="button" onClick={handleAddMapping} disabled={busy}>
-            Add Mapping
-          </button>
-        </div>
-
-        <table className="table">
-          <thead>
-            <tr>
-              <th>ZIP</th>
-              <th>Network</th>
-              <th>Actions</th>
-            </tr>
-          </thead>
-          <tbody>
-            {mappingPagination.pageItems.map((row) => {
-              const isEditing = Boolean(editingMapping[row.zip]);
-              const draft = editingMapping[row.zip] || row;
-              return (
-                <tr key={row.zip}>
-                  <td>
-                    {isEditing ? (
-                      <input
-                        value={draft.zip}
-                        onChange={(e) =>
-                          setEditingMapping((prev) => ({
-                            ...prev,
-                            [row.zip]: { ...draft, zip: e.target.value },
-                          }))
-                        }
-                      />
-                    ) : (
-                      row.zip
-                    )}
-                  </td>
-                  <td>
-                    {isEditing ? (
-                      <select
-                        value={draft.network}
-                        onChange={(e) =>
-                          setEditingMapping((prev) => ({
-                            ...prev,
-                            [row.zip]: { ...draft, network: e.target.value },
-                          }))
-                        }
-                      >
-                        {networkOptions.map((option) => (
-                          <option key={option} value={option}>
-                            {formatNetworkLabel(option)}
-                          </option>
-                        ))}
-                      </select>
-                    ) : (
-                      formatNetworkLabel(row.network)
-                    )}
-                  </td>
-                  <td>
-                    <div className="inline-actions">
-                      {isEditing ? (
-                        <>
-                          <button className="button secondary" type="button" onClick={() => handleSaveMapping(row.zip)} disabled={busy}>
-                            Save
-                          </button>
-                          <button
-                            className="button ghost"
-                            type="button"
-                            onClick={() =>
-                              setEditingMapping((prev) => {
-                                const copy = { ...prev };
-                                delete copy[row.zip];
-                                return copy;
-                              })
-                            }
-                          >
-                            Cancel
-                          </button>
-                        </>
-                      ) : (
-                        <>
-                          <button
-                            className="button ghost"
-                            type="button"
-                            onClick={() =>
-                              setEditingMapping((prev) => ({ ...prev, [row.zip]: { ...row } }))
-                            }
-                          >
-                            Edit
-                          </button>
-                          <button className="button" type="button" onClick={() => handleDeleteMapping(row.zip)} disabled={busy}>
-                            Delete
-                          </button>
-                        </>
-                      )}
-                    </div>
-                  </td>
-                </tr>
-              );
-            })}
-            {networkMappings.length === 0 && (
-              <tr>
-                <td colSpan={3} className="helper">
-                  No ZIP mappings configured yet.
-                </td>
-              </tr>
-            )}
-          </tbody>
-        </table>
-        <TablePagination
-          page={mappingPagination.currentPage}
-          totalItems={networkMappings.length}
-          pageSize={TABLE_PAGE_SIZE}
-          onPageChange={setMappingPage}
-        />
-      </section>
     </section>
   );
 }
