@@ -763,27 +763,6 @@ export default function QuoteDetail() {
         <span className={`badge ${getQuoteStageClass(quote.status)}`}>
           {getQuoteStageLabel(quote.status)}
         </span>
-        <strong>Version</strong>
-        <span>v{quote.version}</span>
-        <strong>HubSpot Ticket</strong>
-        <span>
-          {quote.hubspot_ticket_url ? (
-            <a href={quote.hubspot_ticket_url} target="_blank" rel="noreferrer">
-              {quote.hubspot_ticket_id || "Open Ticket"}
-            </a>
-          ) : (
-            quote.hubspot_ticket_id || "Not linked"
-          )}
-        </span>
-        <strong>HubSpot Last Sync</strong>
-        <span>
-          {quote.hubspot_last_synced_at
-            ? new Date(quote.hubspot_last_synced_at).toLocaleString()
-            : "Never"}
-          {hubSpotSyncPending ? " (syncing...)" : ""}
-        </span>
-        <strong>HubSpot Sync Error</strong>
-        <span>{quote.hubspot_sync_error || "—"}</span>
       </div>
 
       <div className="section-header">
@@ -1404,6 +1383,41 @@ export default function QuoteDetail() {
             </a>
           </div>
         ))}
+      </section>
+
+      <section className="section">
+        <details className="config-collapse">
+          <summary>HubSpot Sync Details</summary>
+          <div className="config-collapse-body">
+            <div className="kv">
+              <strong>Version</strong>
+              <span>v{quote.version}</span>
+              <strong>HubSpot Ticket</strong>
+              <span>
+                {quote.hubspot_ticket_url ? (
+                  <a
+                    href={quote.hubspot_ticket_url}
+                    target="_blank"
+                    rel="noreferrer"
+                  >
+                    {quote.hubspot_ticket_id || "Open Ticket"}
+                  </a>
+                ) : (
+                  quote.hubspot_ticket_id || "Not linked"
+                )}
+              </span>
+              <strong>HubSpot Last Sync</strong>
+              <span>
+                {quote.hubspot_last_synced_at
+                  ? new Date(quote.hubspot_last_synced_at).toLocaleString()
+                  : "Never"}
+                {hubSpotSyncPending ? " (syncing...)" : ""}
+              </span>
+              <strong>HubSpot Sync Error</strong>
+              <span>{quote.hubspot_sync_error || "—"}</span>
+            </div>
+          </div>
+        </details>
       </section>
 
       <div className="inline-actions">
