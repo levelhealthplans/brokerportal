@@ -1141,16 +1141,10 @@ export default function Configuration() {
 
       <section className="section" style={{ marginTop: 12 }}>
         <h3>HubSpot Integration (Admin)</h3>
-        <div className="helper" style={{ marginBottom: 12 }}>
+        <div className="helper hubspot-integration-note">
           MVP flow: a new quote creates a HubSpot ticket. Use popup sign-in
           (OAuth) or a private app token, then configure pipeline/stage and
           mapping rules.
-        </div>
-        <div className="notice" style={{ marginBottom: 12 }}>
-          OAuth Status:{" "}
-          {hubspotSettings.oauth_connected
-            ? `Connected${hubspotSettings.oauth_hub_id ? ` (Hub ID: ${hubspotSettings.oauth_hub_id})` : ""}`
-            : "Not connected"}
         </div>
         <details
           className="config-collapse"
@@ -1170,159 +1164,174 @@ export default function Configuration() {
             role="region"
             aria-labelledby="hubspot-connection-summary"
           >
-            <div className="inline-actions">
-              <label style={{ minWidth: 220 }}>
-                <span
-                  style={{
-                    display: "inline-flex",
-                    alignItems: "center",
-                    gap: 8,
-                  }}
-                >
+            <div className="hubspot-basic-shell">
+              <div className="hubspot-basic-header">
+                <label className="hubspot-toggle">
+                  <span className="hubspot-toggle-copy">
+                    Enable HubSpot Integration
+                  </span>
+                  <span className="hubspot-toggle-control">
+                    <input
+                      className="hubspot-toggle-input"
+                      type="checkbox"
+                      checked={hubspotSettings.enabled}
+                      onChange={(e) =>
+                        setHubspotSettings((prev) => ({
+                          ...prev,
+                          enabled: e.target.checked,
+                        }))
+                      }
+                    />
+                    <span className="hubspot-toggle-slider" aria-hidden="true" />
+                  </span>
+                </label>
+                <div className="hubspot-basic-statuses">
+                  <span
+                    className={`hubspot-status-chip ${hubspotSettings.oauth_connected ? "connected" : "disconnected"}`}
+                  >
+                    OAuth{" "}
+                    {hubspotSettings.oauth_connected
+                      ? `Connected${hubspotSettings.oauth_hub_id ? ` (Hub ID: ${hubspotSettings.oauth_hub_id})` : ""}`
+                      : "Not connected"}
+                  </span>
+                  <span
+                    className={`hubspot-status-chip ${hubspotSettings.token_configured ? "connected" : "disconnected"}`}
+                  >
+                    Private App Token{" "}
+                    {hubspotSettings.token_configured ? "Configured" : "Not configured"}
+                  </span>
+                </div>
+              </div>
+
+              <div className="hubspot-basic-grid">
+                <label>
+                  HubSpot Account ID
                   <input
-                    type="checkbox"
-                    checked={hubspotSettings.enabled}
+                    value={hubspotSettings.portal_id}
                     onChange={(e) =>
                       setHubspotSettings((prev) => ({
                         ...prev,
-                        enabled: e.target.checked,
+                        portal_id: e.target.value,
                       }))
                     }
+                    placeholder="7106327"
                   />
-                  Enable HubSpot Integration
-                </span>
-              </label>
-              <label style={{ minWidth: 220 }}>
-                HubSpot Account ID
-                <input
-                  value={hubspotSettings.portal_id}
-                  onChange={(e) =>
-                    setHubspotSettings((prev) => ({
-                      ...prev,
-                      portal_id: e.target.value,
-                    }))
-                  }
-                  placeholder="7106327"
-                />
-              </label>
-              <label style={{ minWidth: 280 }}>
-                Private App Token
-                <input
-                  type="password"
-                  value={hubspotTokenInput}
-                  onChange={(e) => setHubspotTokenInput(e.target.value)}
-                  placeholder={
-                    hubspotSettings.token_configured
-                      ? "Token saved (enter to replace)"
-                      : "pat-..."
-                  }
-                />
-              </label>
-            </div>
-            <div className="inline-actions" style={{ marginTop: 8 }}>
-              <label style={{ minWidth: 520 }}>
-                OAuth Redirect URI
-                <input
-                  value={hubspotSettings.oauth_redirect_uri || ""}
-                  onChange={(e) =>
-                    setHubspotSettings((prev) => ({
-                      ...prev,
-                      oauth_redirect_uri: e.target.value,
-                    }))
-                  }
-                  placeholder={`${window.location.origin}/api/integrations/hubspot/oauth/callback`}
-                />
-              </label>
-            </div>
-            <div className="inline-actions" style={{ marginTop: 8 }}>
-              <button
-                className="button secondary"
-                type="button"
-                onClick={handleConnectHubSpot}
-                disabled={busy}
-              >
-                Connect HubSpot (Popup)
-              </button>
-              <button
-                className="button ghost"
-                type="button"
-                onClick={handleDisconnectHubSpot}
-                disabled={busy || !hubspotSettings.oauth_connected}
-              >
-                Disconnect OAuth
-              </button>
-            </div>
-            <div className="inline-actions" style={{ marginTop: 8 }}>
-              <label style={{ minWidth: 260 }}>
-                Ticket Pipeline ID
-                <input
-                  value={hubspotSettings.pipeline_id}
-                  onChange={(e) =>
-                    setHubspotSettings((prev) => ({
-                      ...prev,
-                      pipeline_id: e.target.value,
-                    }))
-                  }
-                  placeholder="98238573"
-                />
-              </label>
-              <label style={{ minWidth: 260 }}>
-                Default Stage ID
-                <input
-                  value={hubspotSettings.default_stage_id}
-                  onChange={(e) =>
-                    setHubspotSettings((prev) => ({
-                      ...prev,
-                      default_stage_id: e.target.value,
-                    }))
-                  }
-                  placeholder="1"
-                />
-              </label>
-            </div>
-            <div className="inline-actions" style={{ marginTop: 8 }}>
-              <label style={{ minWidth: 220 }}>
-                <span
-                  style={{
-                    display: "inline-flex",
-                    alignItems: "center",
-                    gap: 8,
-                  }}
-                >
+                </label>
+                <label>
+                  Private App Token
                   <input
-                    type="checkbox"
-                    checked={hubspotSettings.sync_quote_to_hubspot}
+                    type="password"
+                    value={hubspotTokenInput}
+                    onChange={(e) => setHubspotTokenInput(e.target.value)}
+                    placeholder={
+                      hubspotSettings.token_configured
+                        ? "Token saved (enter to replace)"
+                        : "pat-..."
+                    }
+                  />
+                </label>
+                <label className="hubspot-basic-span-2">
+                  OAuth Redirect URI
+                  <input
+                    value={hubspotSettings.oauth_redirect_uri || ""}
                     onChange={(e) =>
                       setHubspotSettings((prev) => ({
                         ...prev,
-                        sync_quote_to_hubspot: e.target.checked,
+                        oauth_redirect_uri: e.target.value,
                       }))
                     }
+                    placeholder={`${window.location.origin}/api/integrations/hubspot/oauth/callback`}
                   />
-                  Quote -&gt; HubSpot Sync
-                </span>
-              </label>
-              <label style={{ minWidth: 220 }}>
-                <span
-                  style={{
-                    display: "inline-flex",
-                    alignItems: "center",
-                    gap: 8,
-                  }}
-                >
+                </label>
+                <label>
+                  Ticket Pipeline ID
                   <input
-                    type="checkbox"
-                    checked={hubspotSettings.sync_hubspot_to_quote}
+                    value={hubspotSettings.pipeline_id}
                     onChange={(e) =>
                       setHubspotSettings((prev) => ({
                         ...prev,
-                        sync_hubspot_to_quote: e.target.checked,
+                        pipeline_id: e.target.value,
                       }))
                     }
+                    placeholder="98238573"
                   />
-                  HubSpot -&gt; Quote Sync
-                </span>
-              </label>
+                </label>
+                <label>
+                  Default Stage ID
+                  <input
+                    value={hubspotSettings.default_stage_id}
+                    onChange={(e) =>
+                      setHubspotSettings((prev) => ({
+                        ...prev,
+                        default_stage_id: e.target.value,
+                      }))
+                    }
+                    placeholder="1"
+                  />
+                </label>
+              </div>
+
+              <div className="hubspot-basic-sync-grid">
+                <label className="hubspot-toggle hubspot-toggle-row">
+                  <span className="hubspot-toggle-copy">
+                    Quote -&gt; HubSpot Sync
+                    <small>Create and update ticket data from quote changes.</small>
+                  </span>
+                  <span className="hubspot-toggle-control">
+                    <input
+                      className="hubspot-toggle-input"
+                      type="checkbox"
+                      checked={hubspotSettings.sync_quote_to_hubspot}
+                      onChange={(e) =>
+                        setHubspotSettings((prev) => ({
+                          ...prev,
+                          sync_quote_to_hubspot: e.target.checked,
+                        }))
+                      }
+                    />
+                    <span className="hubspot-toggle-slider" aria-hidden="true" />
+                  </span>
+                </label>
+                <label className="hubspot-toggle hubspot-toggle-row">
+                  <span className="hubspot-toggle-copy">
+                    HubSpot -&gt; Quote Sync
+                    <small>Allow HubSpot stage changes to update quote status.</small>
+                  </span>
+                  <span className="hubspot-toggle-control">
+                    <input
+                      className="hubspot-toggle-input"
+                      type="checkbox"
+                      checked={hubspotSettings.sync_hubspot_to_quote}
+                      onChange={(e) =>
+                        setHubspotSettings((prev) => ({
+                          ...prev,
+                          sync_hubspot_to_quote: e.target.checked,
+                        }))
+                      }
+                    />
+                    <span className="hubspot-toggle-slider" aria-hidden="true" />
+                  </span>
+                </label>
+              </div>
+
+              <div className="hubspot-basic-actions">
+                <button
+                  className="button secondary"
+                  type="button"
+                  onClick={handleConnectHubSpot}
+                  disabled={busy}
+                >
+                  Connect HubSpot (Popup)
+                </button>
+                <button
+                  className="button ghost"
+                  type="button"
+                  onClick={handleDisconnectHubSpot}
+                  disabled={busy || !hubspotSettings.oauth_connected}
+                >
+                  Disconnect OAuth
+                </button>
+              </div>
             </div>
           </div>
         </details>

@@ -539,6 +539,163 @@ textarea {
   animation: config-collapse-enter 0.2s ease-out;
 }
 
+.hubspot-integration-note {
+  margin-bottom: 12px;
+}
+
+.hubspot-basic-shell {
+  border: 1px solid #d8deee;
+  border-radius: 14px;
+  padding: 12px;
+  background: #f8faff;
+}
+
+.hubspot-basic-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  margin-bottom: 12px;
+  flex-wrap: wrap;
+}
+
+.hubspot-basic-statuses {
+  display: flex;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+
+.hubspot-status-chip {
+  display: inline-flex;
+  align-items: center;
+  padding: 6px 10px;
+  border-radius: 999px;
+  font-size: 12px;
+  border: 1px solid #b9c6e6;
+  background: #eef3ff;
+  color: #17224e;
+}
+
+.hubspot-status-chip.connected {
+  border-color: #93ccd2;
+  background: #e9f7f8;
+  color: #0d4f56;
+}
+
+.hubspot-status-chip.disconnected {
+  border-color: #f5b8c0;
+  background: #fff1f3;
+  color: #8d2f43;
+}
+
+.hubspot-basic-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(220px, 1fr));
+  gap: 10px 12px;
+}
+
+.hubspot-basic-span-2 {
+  grid-column: 1 / -1;
+}
+
+.hubspot-basic-sync-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(220px, 1fr));
+  gap: 10px 12px;
+  margin-top: 12px;
+}
+
+.hubspot-toggle {
+  border: 1px solid #d8deee;
+  border-radius: 12px;
+  background: #ffffff;
+  padding: 10px 12px;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+}
+
+.hubspot-toggle-row {
+  min-height: 72px;
+}
+
+.hubspot-toggle-copy {
+  display: inline-flex;
+  flex-direction: column;
+  gap: 4px;
+  font-size: 13px;
+  color: #17224e;
+  font-weight: 600;
+}
+
+.hubspot-toggle-copy small {
+  font-size: 11px;
+  color: #3f4d5e;
+  font-weight: 400;
+  line-height: 1.3;
+}
+
+.hubspot-toggle-control {
+  position: relative;
+  display: inline-flex;
+  width: 42px;
+  height: 24px;
+  flex-shrink: 0;
+}
+
+.hubspot-toggle-input {
+  appearance: none;
+  width: 42px;
+  height: 24px;
+  margin: 0;
+  border: none;
+  cursor: pointer;
+  background: transparent;
+}
+
+.hubspot-toggle-slider {
+  position: absolute;
+  inset: 0;
+  pointer-events: none;
+  border-radius: 999px;
+  background: #b9c6e6;
+  transition: background-color 0.2s ease;
+}
+
+.hubspot-toggle-slider::before {
+  content: "";
+  position: absolute;
+  top: 2px;
+  left: 2px;
+  width: 20px;
+  height: 20px;
+  border-radius: 50%;
+  background: #ffffff;
+  box-shadow: 0 1px 2px rgba(23, 34, 78, 0.2);
+  transition: transform 0.2s ease;
+}
+
+.hubspot-toggle-input:checked + .hubspot-toggle-slider {
+  background: #28929e;
+}
+
+.hubspot-toggle-input:checked + .hubspot-toggle-slider::before {
+  transform: translateX(18px);
+}
+
+.hubspot-toggle-input:focus-visible + .hubspot-toggle-slider {
+  outline: 2px solid #1e328f;
+  outline-offset: 2px;
+}
+
+.hubspot-basic-actions {
+  margin-top: 12px;
+  display: flex;
+  gap: 10px;
+  flex-wrap: wrap;
+}
+
 @keyframes config-collapse-enter {
   from {
     opacity: 0;
@@ -558,6 +715,11 @@ textarea {
 
   .config-collapse[open] > .config-collapse-body {
     animation: none;
+  }
+
+  .hubspot-toggle-slider,
+  .hubspot-toggle-slider::before {
+    transition: none;
   }
 }
 
@@ -1150,6 +1312,16 @@ textarea {
   .dashboard-activity-row {
     grid-template-columns: 1fr;
     gap: 2px;
+  }
+  .hubspot-basic-grid,
+  .hubspot-basic-sync-grid {
+    grid-template-columns: 1fr;
+  }
+  .hubspot-basic-header {
+    align-items: stretch;
+  }
+  .hubspot-toggle-row {
+    min-height: 0;
   }
   .table-scroll {
     margin-inline: -4px;
