@@ -215,6 +215,42 @@ class AdminPasswordAuthTests(unittest.TestCase):
         self.assertEqual(quote.assigned_user_id, "session-user-1")
         self.assertEqual(quote.broker_org, "Legacy Brokers KC")
 
+    def test_list_installations_broker_without_org_mapping_does_not_500(self) -> None:
+        with main.get_db() as conn:
+            cur = conn.cursor()
+            now = main.now_iso()
+            cur.execute(
+                """
+                INSERT INTO User (
+                    id, first_name, last_name, email, phone, job_title, organization, role,
+                    password_salt, password_hash, created_at, updated_at
+                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                """,
+                (
+                    "broker-user-1",
+                    "Jake",
+                    "Simpara",
+                    "jake@simparahr.com",
+                    "",
+                    "Broker",
+                    "Simpara HR",
+                    "broker",
+                    "salt",
+                    "hash",
+                    now,
+                    now,
+                ),
+            )
+            conn.commit()
+
+        with patch.object(
+            main,
+            "resolve_access_scope",
+            return_value=("broker", "jake@simparahr.com"),
+        ):
+            installations = main.list_installations(request=object())
+        self.assertEqual(installations, [])
+
 
 if __name__ == "__main__":
     unittest.main()

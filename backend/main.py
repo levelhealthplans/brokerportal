@@ -273,7 +273,11 @@ def fetch_org_by_domain(
 
 
 def build_access_filter(
-    conn: sqlite3.Connection, role: Optional[str], email: Optional[str]
+    conn: sqlite3.Connection,
+    role: Optional[str],
+    email: Optional[str],
+    *,
+    include_assigned_user: bool = True,
 ) -> tuple[str, List[Any]]:
     if not role or role == "admin":
         return "", []
@@ -298,7 +302,7 @@ def build_access_filter(
         if broker_org:
             clauses.append("broker_org = ?")
             params.append(broker_org)
-        if user_id:
+        if include_assigned_user and user_id:
             clauses.append("assigned_user_id = ?")
             params.append(user_id)
         if not clauses:
@@ -5108,7 +5112,12 @@ def list_installations(
     with get_db() as conn:
         cur = conn.cursor()
         scoped_role, scoped_email = resolve_access_scope(conn, request, role, email)
-        where_clause, params = build_access_filter(conn, scoped_role, scoped_email)
+        where_clause, params = build_access_filter(
+            conn,
+            scoped_role,
+            scoped_email,
+            include_assigned_user=False,
+        )
         cur.execute(
             f"SELECT * FROM Installation {where_clause} ORDER BY created_at DESC",
             params,
@@ -5132,7 +5141,12 @@ def get_installation_detail(
         if not installation:
             raise HTTPException(status_code=404, detail="Installation not found")
         if scoped_role != "admin":
-            where_clause, params = build_access_filter(conn, scoped_role, scoped_email)
+            where_clause, params = build_access_filter(
+                conn,
+                scoped_role,
+                scoped_email,
+                include_assigned_user=False,
+            )
             if where_clause:
                 cur.execute(
                     f"SELECT id FROM Installation {where_clause} AND id = ? LIMIT 1",
