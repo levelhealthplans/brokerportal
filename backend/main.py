@@ -118,6 +118,58 @@ HUBSPOT_TICKET_READ_ONLY_PREFIXES = (
     "hs_all_associated_",
     "hs_primary_",
 )
+US_STATE_ABBREVIATIONS = {
+    "AL": "Alabama",
+    "AK": "Alaska",
+    "AZ": "Arizona",
+    "AR": "Arkansas",
+    "CA": "California",
+    "CO": "Colorado",
+    "CT": "Connecticut",
+    "DE": "Delaware",
+    "FL": "Florida",
+    "GA": "Georgia",
+    "HI": "Hawaii",
+    "ID": "Idaho",
+    "IL": "Illinois",
+    "IN": "Indiana",
+    "IA": "Iowa",
+    "KS": "Kansas",
+    "KY": "Kentucky",
+    "LA": "Louisiana",
+    "ME": "Maine",
+    "MD": "Maryland",
+    "MA": "Massachusetts",
+    "MI": "Michigan",
+    "MN": "Minnesota",
+    "MS": "Mississippi",
+    "MO": "Missouri",
+    "MT": "Montana",
+    "NE": "Nebraska",
+    "NV": "Nevada",
+    "NH": "New Hampshire",
+    "NJ": "New Jersey",
+    "NM": "New Mexico",
+    "NY": "New York",
+    "NC": "North Carolina",
+    "ND": "North Dakota",
+    "OH": "Ohio",
+    "OK": "Oklahoma",
+    "OR": "Oregon",
+    "PA": "Pennsylvania",
+    "RI": "Rhode Island",
+    "SC": "South Carolina",
+    "SD": "South Dakota",
+    "TN": "Tennessee",
+    "TX": "Texas",
+    "UT": "Utah",
+    "VT": "Vermont",
+    "VA": "Virginia",
+    "WA": "Washington",
+    "WV": "West Virginia",
+    "WI": "Wisconsin",
+    "WY": "Wyoming",
+}
 HUBSPOT_OAUTH_DEFAULT_SCOPES = (
     "oauth tickets "
     "crm.objects.contacts.read crm.objects.contacts.write "
@@ -2307,20 +2359,101 @@ def extract_hubspot_invalid_properties(error_message: str) -> List[Dict[str, Any
     return deduped
 
 
-def remove_invalid_ticket_properties(
+def normalize_hubspot_option_text(value: str) -> str:
+    return re.sub(r"\s+", " ", str(value or "").strip().lower())
+
+
+def parse_hubspot_allowed_options(error_message: str) -> List[str]:
+    text = str(error_message or "")
+    patterns = [
+        r"allowed options:\s*\[(.*?)\]",
+        r"one of the allowed options:\s*\[(.*?)\]",
+    ]
+    for pattern in patterns:
+        match = re.search(pattern, text, re.IGNORECASE | re.DOTALL)
+        if not match:
+            continue
+        raw = match.group(1)
+        options: List[str] = []
+        for item in raw.split(","):
+            option = item.strip().strip('"').strip("'")
+            if option not in options:
+                options.append(option)
+        return options
+    return []
+
+
+def suggest_hubspot_option_replacement(
+    *,
+    attempted_value: str,
+    error_message: str,
+) -> Optional[str]:
+    value = str(attempted_value or "").strip()
+    if not value:
+        return None
+    options = parse_hubspot_allowed_options(error_message)
+    if not options:
+        return None
+
+    by_normalized = {normalize_hubspot_option_text(option): option for option in options}
+    normalized_value = normalize_hubspot_option_text(value)
+    exact = by_normalized.get(normalized_value)
+    if exact is not None:
+        return exact
+
+    state_name = US_STATE_ABBREVIATIONS.get(value.upper())
+    if state_name:
+        normalized_state_name = normalize_hubspot_option_text(state_name)
+        if normalized_state_name in by_normalized:
+            return by_normalized[normalized_state_name]
+
+    ordered_options = sorted(options, key=len, reverse=True)
+    for option in ordered_options:
+        normalized_option = normalize_hubspot_option_text(option)
+        if not normalized_option:
+            continue
+        if normalized_value.startswith(normalized_option):
+            return option
+
+    value_tokens = set(re.findall(r"[a-z0-9]+", normalized_value))
+    if value_tokens:
+        for option in ordered_options:
+            option_tokens = set(re.findall(r"[a-z0-9]+", normalize_hubspot_option_text(option)))
+            if option_tokens and option_tokens.issubset(value_tokens):
+                return option
+    return None
+
+
+def recover_invalid_ticket_properties(
     properties: Dict[str, str], invalid_rows: List[Dict[str, Any]]
-) -> tuple[Dict[str, str], List[str]]:
+) -> tuple[Dict[str, str], List[str], List[str]]:
     next_properties = dict(properties)
     removed_names: List[str] = []
+    adjusted_pairs: List[str] = []
     for row in invalid_rows:
         name = str(row.get("name") or "").strip()
-        if not name:
+        if not name or name not in next_properties:
             continue
-        if name in next_properties:
-            next_properties.pop(name, None)
-            if name not in removed_names:
-                removed_names.append(name)
-    return next_properties, removed_names
+        error_code = str(row.get("error") or "").strip().upper()
+        message = str(row.get("message") or row.get("localizedErrorMessage") or "")
+        attempted = str(row.get("propertyValue") or next_properties.get(name) or "")
+
+        if error_code == "INVALID_OPTION":
+            replacement = suggest_hubspot_option_replacement(
+                attempted_value=attempted,
+                error_message=message,
+            )
+            if replacement and replacement != str(next_properties.get(name) or ""):
+                next_properties[name] = replacement
+                pair = f"{name}={replacement}"
+                if pair not in adjusted_pairs:
+                    adjusted_pairs.append(pair)
+                continue
+
+        next_properties.pop(name, None)
+        if name not in removed_names:
+            removed_names.append(name)
+    return next_properties, removed_names, adjusted_pairs
 
 
 def sanitize_hubspot_ticket_properties(properties: Dict[str, str]) -> tuple[Dict[str, str], List[str]]:
@@ -2353,6 +2486,7 @@ def upsert_hubspot_ticket_with_recovery(
     method = "POST" if not ticket_id else "PATCH"
     attempt_properties, pre_removed = sanitize_hubspot_ticket_properties(properties)
     removed_all: List[str] = list(pre_removed)
+    adjusted_all: List[str] = []
     for _ in range(3):
         try:
             result = hubspot_api_request(
@@ -2361,8 +2495,13 @@ def upsert_hubspot_ticket_with_recovery(
                 path,
                 body={"properties": attempt_properties},
             )
+            warning_parts: List[str] = []
+            if adjusted_all:
+                warning_parts.append(f"Adjusted option values: {', '.join(adjusted_all)}")
             if removed_all:
-                warning = f"Dropped invalid ticket properties: {', '.join(removed_all)}"
+                warning_parts.append(f"Dropped invalid ticket properties: {', '.join(removed_all)}")
+            if warning_parts:
+                warning = " | ".join(warning_parts)
                 return result, warning
             return result, None
         except Exception as exc:
@@ -2370,12 +2509,17 @@ def upsert_hubspot_ticket_with_recovery(
             invalid_rows = extract_hubspot_invalid_properties(message)
             if not invalid_rows:
                 raise
-            next_properties, removed_names = remove_invalid_ticket_properties(attempt_properties, invalid_rows)
-            if not removed_names:
+            next_properties, removed_names, adjusted_pairs = recover_invalid_ticket_properties(
+                attempt_properties, invalid_rows
+            )
+            if not removed_names and not adjusted_pairs:
                 raise
             for name in removed_names:
                 if name not in removed_all:
                     removed_all.append(name)
+            for pair in adjusted_pairs:
+                if pair not in adjusted_all:
+                    adjusted_all.append(pair)
             attempt_properties = next_properties
 
     result = hubspot_api_request(
@@ -2384,8 +2528,13 @@ def upsert_hubspot_ticket_with_recovery(
         path,
         body={"properties": attempt_properties},
     )
+    warning_parts: List[str] = []
+    if adjusted_all:
+        warning_parts.append(f"Adjusted option values: {', '.join(adjusted_all)}")
     if removed_all:
-        warning = f"Dropped invalid ticket properties: {', '.join(removed_all)}"
+        warning_parts.append(f"Dropped invalid ticket properties: {', '.join(removed_all)}")
+    if warning_parts:
+        warning = " | ".join(warning_parts)
         return result, warning
     return result, None
 
