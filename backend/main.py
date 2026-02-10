@@ -94,6 +94,17 @@ IMPLEMENTATION_TASK_TITLES = [
     "Plan is Live",
 ]
 
+HUBSPOT_UPLOAD_FIELD_TYPES = [
+    ("census", "census"),
+    ("sbc", "sbc"),
+    ("current_pricing", "current_pricing"),
+    ("renewal", "renewal"),
+    ("high_cost_claimant_report", "high_cost_claimant_report"),
+    ("aggregate_report", "aggregate_report"),
+    ("other_claims_data", "other_claims_data"),
+    ("other_files", "other_files"),
+]
+
 BROKER_ADMIN_ONLY_TASKS = {"Vendors Notified", "Ventegra vZip"}
 TASK_STATE_CANONICAL = {
     "not started": "Not Started",
@@ -2300,6 +2311,46 @@ def to_hubspot_property_value(value: Any) -> str:
     return str(value)
 
 
+def build_quote_upload_hubspot_fields(conn: sqlite3.Connection, quote_id: str) -> Dict[str, Any]:
+    cur = conn.cursor()
+    cur.execute(
+        """
+        SELECT type, filename, created_at
+        FROM Upload
+        WHERE quote_id = ?
+        ORDER BY created_at DESC
+        """,
+        (quote_id,),
+    )
+    rows = cur.fetchall()
+    rows_by_type: Dict[str, List[sqlite3.Row]] = {}
+    for row in rows:
+        upload_type = str(row["type"] or "").strip()
+        if not upload_type:
+            continue
+        rows_by_type.setdefault(upload_type, []).append(row)
+
+    fields: Dict[str, Any] = {}
+    for upload_type, prefix in HUBSPOT_UPLOAD_FIELD_TYPES:
+        matches = rows_by_type.get(upload_type, [])
+        fields[f"{prefix}_uploaded"] = bool(matches)
+
+    census_rows = rows_by_type.get("census", [])
+    latest_census = census_rows[0] if census_rows else None
+    fields["census_latest_filename"] = str(latest_census["filename"] or "").strip() if latest_census else ""
+    fields["census_latest_uploaded_at"] = str(latest_census["created_at"] or "").strip() if latest_census else ""
+    return fields
+
+
+def build_quote_hubspot_context(conn: sqlite3.Connection, quote: Dict[str, Any]) -> Dict[str, Any]:
+    context = dict(quote)
+    quote_id = str(context.get("id") or "").strip()
+    if not quote_id:
+        return context
+    context.update(build_quote_upload_hubspot_fields(conn, quote_id))
+    return context
+
+
 def build_hubspot_ticket_properties(quote: Dict[str, Any], settings: Dict[str, Any]) -> Dict[str, str]:
     status_key = str(quote.get("status") or "").strip()
     mapped_stage = settings["quote_status_to_stage"].get(status_key)
@@ -2906,7 +2957,7 @@ def sync_quote_to_hubspot(conn: sqlite3.Connection, quote_id: str, *, create_if_
         return
 
     quote_row = fetch_quote(conn, quote_id)
-    quote = dict(quote_row)
+    quote = build_quote_hubspot_context(conn, dict(quote_row))
     properties = build_hubspot_ticket_properties(quote, settings)
     ticket_id = (quote.get("hubspot_ticket_id") or "").strip()
     if not ticket_id and not create_if_missing:
@@ -4426,7 +4477,9 @@ def upload_quote_file(
 ) -> UploadOut:
     with get_db() as conn:
         fetch_quote(conn, quote_id)
-    return save_upload(quote_id, type, file)
+    upload = save_upload(quote_id, type, file)
+    sync_quote_to_hubspot_async(quote_id, create_if_missing=False)
+    return upload
 
 
 @app.get("/api/quotes/{quote_id}/uploads", response_model=List[UploadOut])
@@ -4461,6 +4514,7 @@ def delete_quote_upload(quote_id: str, upload_id: str) -> Dict[str, str]:
         cur.execute("DELETE FROM Upload WHERE id = ?", (upload_id,))
         conn.commit()
         recompute_needs_action(conn, quote_id)
+        sync_quote_to_hubspot_async(quote_id, create_if_missing=False)
     return {"status": "deleted"}
 
 
