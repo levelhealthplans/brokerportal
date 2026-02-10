@@ -153,9 +153,48 @@ export default function QuoteDetail() {
       .catch((err) => setError(err.message));
   };
 
+  const isHubSpotSyncPending = (quote?: QuoteDetailType["quote"] | null) => {
+    if (!quote) return false;
+    const updatedAt = Date.parse(quote.updated_at || "");
+    if (!Number.isFinite(updatedAt)) return false;
+    const syncedAt = Date.parse(quote.hubspot_last_synced_at || "");
+    if (!Number.isFinite(syncedAt)) return true;
+    return syncedAt < updatedAt;
+  };
+
   useEffect(() => {
     refresh();
   }, [quoteId]);
+
+  useEffect(() => {
+    if (!quoteId || !data?.quote) return;
+    if (!isHubSpotSyncPending(data.quote)) return;
+
+    let cancelled = false;
+    let attempts = 0;
+    const maxAttempts = 12;
+    const intervalId = window.setInterval(() => {
+      attempts += 1;
+      getQuote(quoteId)
+        .then((next) => {
+          if (cancelled) return;
+          setData(next);
+          if (!isHubSpotSyncPending(next.quote) || attempts >= maxAttempts) {
+            window.clearInterval(intervalId);
+          }
+        })
+        .catch(() => {
+          if (attempts >= maxAttempts) {
+            window.clearInterval(intervalId);
+          }
+        });
+    }, 2000);
+
+    return () => {
+      cancelled = true;
+      window.clearInterval(intervalId);
+    };
+  }, [quoteId, data?.quote?.updated_at, data?.quote?.hubspot_last_synced_at]);
 
   useEffect(() => {
     getNetworkOptions()
@@ -611,6 +650,7 @@ export default function QuoteDetail() {
   }
 
   const { quote, uploads, proposals } = data;
+  const hubSpotSyncPending = isHubSpotSyncPending(quote);
   const manualOptions = quote.manual_network && !networkOptions.includes(quote.manual_network)
     ? [quote.manual_network, ...networkOptions]
     : networkOptions;
@@ -651,6 +691,7 @@ export default function QuoteDetail() {
           {quote.hubspot_last_synced_at
             ? new Date(quote.hubspot_last_synced_at).toLocaleString()
             : "Never"}
+          {hubSpotSyncPending ? " (syncing...)" : ""}
         </span>
         <strong>HubSpot Sync Error</strong>
         <span>{quote.hubspot_sync_error || "—"}</span>
