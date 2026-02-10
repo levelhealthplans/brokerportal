@@ -467,6 +467,104 @@ textarea {
   flex-wrap: wrap;
 }
 
+.config-collapse {
+  margin-top: 12px;
+  border: 1px solid #d8deee;
+  border-radius: 14px;
+  background: #ffffff;
+  overflow: hidden;
+}
+
+.config-collapse summary {
+  list-style: none;
+  cursor: pointer;
+  padding: 12px 14px;
+  background: #f5f8ff;
+  border-bottom: 1px solid #d8deee;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  font-weight: 600;
+}
+
+.config-collapse summary:focus-visible {
+  outline: 2px solid #1e328f;
+  outline-offset: -2px;
+}
+
+.config-collapse[open] summary {
+  background: #edf3ff;
+}
+
+.config-collapse summary::-webkit-details-marker {
+  display: none;
+}
+
+.config-collapse summary::after {
+  content: "▾";
+  font-size: 12px;
+  color: #17224e;
+  transition: transform 0.15s ease;
+}
+
+.config-collapse[open] summary::after {
+  transform: rotate(180deg);
+}
+
+.config-collapse-body {
+  padding: 12px 14px 14px;
+}
+
+.config-collapse[open] > .config-collapse-body {
+  animation: config-collapse-enter 0.2s ease-out;
+}
+
+@keyframes config-collapse-enter {
+  from {
+    opacity: 0;
+    transform: translateY(-4px);
+  }
+
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .config-collapse summary::after {
+    transition: none;
+  }
+
+  .config-collapse[open] > .config-collapse-body {
+    animation: none;
+  }
+}
+
+.hubspot-mapping-shell {
+  border: 1px solid #d8deee;
+  border-radius: 14px;
+  padding: 12px;
+  background: #f8faff;
+}
+
+.hubspot-mapping-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  flex-wrap: wrap;
+  margin-bottom: 10px;
+}
+
+.hubspot-mapping-stats {
+  display: flex;
+  gap: 8px;
+  flex-wrap: wrap;
+  margin-bottom: 10px;
+}
+
 .task-actions {
   display: flex;
   align-items: center;
