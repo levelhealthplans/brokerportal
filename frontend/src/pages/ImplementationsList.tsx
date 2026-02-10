@@ -19,12 +19,14 @@ export default function ImplementationsList() {
 
   useEffect(() => {
     if (installations.length === 0) return;
-    Promise.all(installations.map((inst) => getInstallation(inst.id, { role, email })))
+    Promise.all(
+      installations.map((inst) => getInstallation(inst.id, { role, email })),
+    )
       .then((details) => {
         const counts: Record<string, number> = {};
         details.forEach((detail) => {
           counts[detail.installation.id] = detail.tasks.filter(
-            (task) => task.state !== "Done" && task.state !== "Complete"
+            (task) => task.state !== "Done" && task.state !== "Complete",
           ).length;
         });
         setOpenTasks(counts);
@@ -34,7 +36,7 @@ export default function ImplementationsList() {
 
   const pagination = useMemo(
     () => paginateItems(installations, page),
-    [installations, page]
+    [installations, page],
   );
 
   useEffect(() => {
@@ -47,45 +49,53 @@ export default function ImplementationsList() {
     <section className="section">
       <h2>Implementations</h2>
       {error && <div className="notice">{error}</div>}
-      <table className="table">
-        <thead>
-          <tr>
-            <th>Case ID</th>
-            <th>Group</th>
-            <th>Effective Date</th>
-            <th>Status</th>
-            <th>Open Tasks</th>
-          </tr>
-        </thead>
-        <tbody>
-          {pagination.pageItems.map((installation) => (
-            <tr key={installation.id}>
-              <td>{installation.id.slice(0, 8)}</td>
-              <td>
-                <Link className="table-link" to={`/quotes/${installation.quote_id}`}>
-                  {installation.company}
-                </Link>
-              </td>
-              <td>{installation.effective_date || "—"}</td>
-              <td>
-                <span className="badge success">{installation.status}</span>
-              </td>
-              <td>
-                <Link className="table-link" to={`/implementations/${installation.id}`}>
-                  {openTasks[installation.id] ?? "—"}
-                </Link>
-              </td>
-            </tr>
-          ))}
-          {installations.length === 0 && (
+      <div className="table-scroll">
+        <table className="table">
+          <thead>
             <tr>
-              <td colSpan={5} className="helper">
-                No implementations yet.
-              </td>
+              <th>Case ID</th>
+              <th>Group</th>
+              <th>Effective Date</th>
+              <th>Status</th>
+              <th>Open Tasks</th>
             </tr>
-          )}
-        </tbody>
-      </table>
+          </thead>
+          <tbody>
+            {pagination.pageItems.map((installation) => (
+              <tr key={installation.id}>
+                <td>{installation.id.slice(0, 8)}</td>
+                <td>
+                  <Link
+                    className="table-link"
+                    to={`/quotes/${installation.quote_id}`}
+                  >
+                    {installation.company}
+                  </Link>
+                </td>
+                <td>{installation.effective_date || "—"}</td>
+                <td>
+                  <span className="badge success">{installation.status}</span>
+                </td>
+                <td>
+                  <Link
+                    className="table-link"
+                    to={`/implementations/${installation.id}`}
+                  >
+                    {openTasks[installation.id] ?? "—"}
+                  </Link>
+                </td>
+              </tr>
+            ))}
+            {installations.length === 0 && (
+              <tr>
+                <td colSpan={5} className="helper">
+                  No implementations yet.
+                </td>
+              </tr>
+            )}
+          </tbody>
+        </table>
+      </div>
       <TablePagination
         page={pagination.currentPage}
         totalItems={installations.length}

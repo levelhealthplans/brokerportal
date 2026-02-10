@@ -14,7 +14,14 @@ import { paginateItems, TablePagination } from "../components/TablePagination";
 
 export default function Organizations() {
   const [orgs, setOrgs] = useState<Organization[]>([]);
-  const [quotes, setQuotes] = useState<{ id: string; company: string; sponsor_domain?: string | null; broker_org?: string | null }[]>([]);
+  const [quotes, setQuotes] = useState<
+    {
+      id: string;
+      company: string;
+      sponsor_domain?: string | null;
+      broker_org?: string | null;
+    }[]
+  >([]);
   const [error, setError] = useState<string | null>(null);
   const [form, setForm] = useState({
     name: "",
@@ -29,7 +36,9 @@ export default function Organizations() {
   });
   const [assignOrgId, setAssignOrgId] = useState<string | null>(null);
   const [selectedQuoteIds, setSelectedQuoteIds] = useState<string[]>([]);
-  const [typeFilter, setTypeFilter] = useState<"all" | "broker" | "sponsor">("all");
+  const [typeFilter, setTypeFilter] = useState<"all" | "broker" | "sponsor">(
+    "all",
+  );
   const [alphaSort, setAlphaSort] = useState<"asc" | "desc">("asc");
   const [createModalOpen, setCreateModalOpen] = useState(false);
   const [page, setPage] = useState(1);
@@ -47,8 +56,8 @@ export default function Organizations() {
             company: q.company,
             sponsor_domain: q.sponsor_domain,
             broker_org: q.broker_org,
-          }))
-        )
+          })),
+        ),
       )
       .catch(() => setQuotes([]));
   };
@@ -107,7 +116,9 @@ export default function Organizations() {
   };
 
   const handleDelete = async (org: Organization) => {
-    const confirmed = window.confirm(`Delete ${org.name}? This cannot be undone.`);
+    const confirmed = window.confirm(
+      `Delete ${org.name}? This cannot be undone.`,
+    );
     if (!confirmed) return;
     setError(null);
     try {
@@ -129,7 +140,7 @@ export default function Organizations() {
       .filter((q) =>
         org.type === "broker"
           ? q.broker_org === org.name
-          : q.sponsor_domain === org.domain
+          : q.sponsor_domain === org.domain,
       )
       .map((q) => q.id);
     setSelectedQuoteIds(preselected);
@@ -149,14 +160,16 @@ export default function Organizations() {
 
   const visibleOrgs = useMemo(() => {
     const filtered =
-      typeFilter === "all" ? orgs : orgs.filter((org) => org.type === typeFilter);
+      typeFilter === "all"
+        ? orgs
+        : orgs.filter((org) => org.type === typeFilter);
     const sorted = [...filtered].sort((a, b) => a.name.localeCompare(b.name));
     return alphaSort === "asc" ? sorted : sorted.reverse();
   }, [orgs, typeFilter, alphaSort]);
 
   const pagination = useMemo(
     () => paginateItems(visibleOrgs, page),
-    [visibleOrgs, page]
+    [visibleOrgs, page],
   );
 
   useEffect(() => {
@@ -167,20 +180,34 @@ export default function Organizations() {
 
   return (
     <section className="section">
-      <div className="inline-actions" style={{ justifyContent: "space-between", marginBottom: 8 }}>
+      <div
+        className="inline-actions"
+        style={{ justifyContent: "space-between", marginBottom: 8 }}
+      >
         <h2 style={{ margin: 0 }}>Organizations</h2>
-        <button className="button" type="button" onClick={() => setCreateModalOpen(true)}>
+        <button
+          className="button"
+          type="button"
+          onClick={() => setCreateModalOpen(true)}
+        >
           Create Organization
         </button>
       </div>
       {error && <div className="notice">{error}</div>}
 
       {createModalOpen && (
-        <div className="modal-backdrop" onClick={() => setCreateModalOpen(false)}>
+        <div
+          className="modal-backdrop"
+          onClick={() => setCreateModalOpen(false)}
+        >
           <div className="modal" onClick={(event) => event.stopPropagation()}>
             <div className="modal-header">
               <h3 style={{ margin: 0 }}>Create Organization</h3>
-              <button className="button ghost" type="button" onClick={() => setCreateModalOpen(false)}>
+              <button
+                className="button ghost"
+                type="button"
+                onClick={() => setCreateModalOpen(false)}
+              >
                 Close
               </button>
             </div>
@@ -216,7 +243,11 @@ export default function Organizations() {
                 <button className="button" type="submit">
                   Create Organization
                 </button>
-                <button className="button ghost" type="button" onClick={() => setCreateModalOpen(false)}>
+                <button
+                  className="button ghost"
+                  type="button"
+                  onClick={() => setCreateModalOpen(false)}
+                >
                   Cancel
                 </button>
               </div>
@@ -230,7 +261,9 @@ export default function Organizations() {
           Filter Type
           <select
             value={typeFilter}
-            onChange={(e) => setTypeFilter(e.target.value as "all" | "broker" | "sponsor")}
+            onChange={(e) =>
+              setTypeFilter(e.target.value as "all" | "broker" | "sponsor")
+            }
           >
             <option value="all">All</option>
             <option value="broker">Broker</option>
@@ -239,122 +272,136 @@ export default function Organizations() {
         </label>
         <label>
           Sort
-          <select value={alphaSort} onChange={(e) => setAlphaSort(e.target.value as "asc" | "desc")}>
+          <select
+            value={alphaSort}
+            onChange={(e) => setAlphaSort(e.target.value as "asc" | "desc")}
+          >
             <option value="asc">Alphabetical (A-Z)</option>
             <option value="desc">Alphabetical (Z-A)</option>
           </select>
         </label>
       </div>
 
-      <table className="table" style={{ marginTop: 20 }}>
-        <thead>
-          <tr>
-            <th>Name</th>
-            <th>Type</th>
-            <th>Domain</th>
-            <th>Created</th>
-            <th>Actions</th>
-          </tr>
-        </thead>
-        <tbody>
-          {pagination.pageItems.map((org) => {
-            const isEditing = editingId === org.id;
-            return (
-              <tr key={org.id}>
-                <td>
-                  {isEditing ? (
-                    <input
-                      value={editDraft.name}
-                      onChange={(e) => handleEditChange("name", e.target.value)}
-                    />
-                  ) : (
-                    <Link className="table-link" to={`/admin/organizations/${org.id}`}>
-                      {org.name}
-                    </Link>
-                  )}
-                </td>
-                <td>
-                  {isEditing ? (
-                    <select
-                      value={editDraft.type}
-                      onChange={(e) => handleEditChange("type", e.target.value)}
-                    >
-                      <option value="broker">Broker</option>
-                      <option value="sponsor">Plan Sponsor</option>
-                    </select>
-                  ) : (
-                    <span className="badge primary">
-                      {org.type === "broker" ? "Broker" : "Plan Sponsor"}
-                    </span>
-                  )}
-                </td>
-                <td>
-                  {isEditing ? (
-                    <input
-                      value={editDraft.domain}
-                      onChange={(e) => handleEditChange("domain", e.target.value)}
-                    />
-                  ) : (
-                    org.domain
-                  )}
-                </td>
-                <td>{new Date(org.created_at).toLocaleDateString()}</td>
-                <td>
-                  {isEditing ? (
-                    <div className="inline-actions">
-                      <button
-                        className="button secondary"
-                        type="button"
-                        onClick={() => handleEditSave(org.id)}
+      <div className="table-scroll">
+        <table className="table" style={{ marginTop: 20 }}>
+          <thead>
+            <tr>
+              <th>Name</th>
+              <th>Type</th>
+              <th>Domain</th>
+              <th>Created</th>
+              <th>Actions</th>
+            </tr>
+          </thead>
+          <tbody>
+            {pagination.pageItems.map((org) => {
+              const isEditing = editingId === org.id;
+              return (
+                <tr key={org.id}>
+                  <td>
+                    {isEditing ? (
+                      <input
+                        value={editDraft.name}
+                        onChange={(e) =>
+                          handleEditChange("name", e.target.value)
+                        }
+                      />
+                    ) : (
+                      <Link
+                        className="table-link"
+                        to={`/admin/organizations/${org.id}`}
                       >
-                        Save
-                      </button>
-                      <button
-                        className="button ghost"
-                        type="button"
-                        onClick={() => setEditingId(null)}
+                        {org.name}
+                      </Link>
+                    )}
+                  </td>
+                  <td>
+                    {isEditing ? (
+                      <select
+                        value={editDraft.type}
+                        onChange={(e) =>
+                          handleEditChange("type", e.target.value)
+                        }
                       >
-                        Cancel
-                      </button>
-                    </div>
-                  ) : (
-                    <div className="inline-actions">
-                      <button
-                        className="button ghost"
-                        type="button"
-                        onClick={() => startEdit(org)}
-                      >
-                        Edit
-                      </button>
-                      <button
-                        className="button secondary"
-                        type="button"
-                        onClick={() => toggleAssign(org)}
-                      >
-                        {assignOrgId === org.id ? "Close" : "Assign Quotes"}
-                      </button>
-                      <button
-                        className="button"
-                        type="button"
-                        onClick={() => handleDelete(org)}
-                      >
-                        Delete
-                      </button>
-                    </div>
-                  )}
+                        <option value="broker">Broker</option>
+                        <option value="sponsor">Plan Sponsor</option>
+                      </select>
+                    ) : (
+                      <span className="badge primary">
+                        {org.type === "broker" ? "Broker" : "Plan Sponsor"}
+                      </span>
+                    )}
+                  </td>
+                  <td>
+                    {isEditing ? (
+                      <input
+                        value={editDraft.domain}
+                        onChange={(e) =>
+                          handleEditChange("domain", e.target.value)
+                        }
+                      />
+                    ) : (
+                      org.domain
+                    )}
+                  </td>
+                  <td>{new Date(org.created_at).toLocaleDateString()}</td>
+                  <td>
+                    {isEditing ? (
+                      <div className="inline-actions">
+                        <button
+                          className="button secondary"
+                          type="button"
+                          onClick={() => handleEditSave(org.id)}
+                        >
+                          Save
+                        </button>
+                        <button
+                          className="button ghost"
+                          type="button"
+                          onClick={() => setEditingId(null)}
+                        >
+                          Cancel
+                        </button>
+                      </div>
+                    ) : (
+                      <div className="inline-actions">
+                        <button
+                          className="button ghost"
+                          type="button"
+                          onClick={() => startEdit(org)}
+                        >
+                          Edit
+                        </button>
+                        <button
+                          className="button secondary"
+                          type="button"
+                          onClick={() => toggleAssign(org)}
+                        >
+                          {assignOrgId === org.id ? "Close" : "Assign Quotes"}
+                        </button>
+                        <button
+                          className="button"
+                          type="button"
+                          onClick={() => handleDelete(org)}
+                        >
+                          Delete
+                        </button>
+                      </div>
+                    )}
+                  </td>
+                </tr>
+              );
+            })}
+            {visibleOrgs.length === 0 && (
+              <tr>
+                <td colSpan={5} className="helper">
+                  No organizations match current filters.
                 </td>
               </tr>
-            );
-          })}
-          {visibleOrgs.length === 0 && (
-            <tr>
-              <td colSpan={5} className="helper">
-                No organizations match current filters.
-              </td>
-            </tr>
-          )}
-        </tbody>
-      </table>
+            )}
+          </tbody>
+        </table>
+      </div>
       <TablePagination
         page={pagination.currentPage}
         totalItems={visibleOrgs.length}
@@ -365,8 +412,8 @@ export default function Organizations() {
         <div className="section" style={{ marginTop: 20 }}>
           <h3>Assign Quotes</h3>
           <div className="helper" style={{ marginBottom: 12 }}>
-            Select quotes to attach to this organization. This updates broker or sponsor
-            access immediately.
+            Select quotes to attach to this organization. This updates broker or
+            sponsor access immediately.
           </div>
           <div className="form-grid">
             {quotes.map((quote) => (

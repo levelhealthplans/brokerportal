@@ -30,7 +30,13 @@ export default function QuoteDetail() {
   const [busy, setBusy] = useState(false);
   const [wizardOpen, setWizardOpen] = useState(false);
   const [wizardIssues, setWizardIssues] = useState<
-    { row: number; field: string; issue: string; value?: string; mapped_value?: string }[]
+    {
+      row: number;
+      field: string;
+      issue: string;
+      value?: string;
+      mapped_value?: string;
+    }[]
   >([]);
   const [wizardStatus, setWizardStatus] = useState<string | null>(null);
   const [autoOpened, setAutoOpened] = useState(false);
@@ -40,7 +46,9 @@ export default function QuoteDetail() {
   const [totalRows, setTotalRows] = useState(0);
   const [issueRows, setIssueRows] = useState(0);
   const [detectedHeaders, setDetectedHeaders] = useState<string[]>([]);
-  const [headerMappings, setHeaderMappings] = useState<Record<string, string>>({});
+  const [headerMappings, setHeaderMappings] = useState<Record<string, string>>(
+    {},
+  );
   const [editGroupOpen, setEditGroupOpen] = useState(false);
   const [groupDraft, setGroupDraft] = useState({
     company: "",
@@ -62,7 +70,12 @@ export default function QuoteDetail() {
   const [proposalUrlDraft, setProposalUrlDraft] = useState("");
   const [coveragePage, setCoveragePage] = useState(1);
   const [wizardIssuesPage, setWizardIssuesPage] = useState(1);
-  const statusMessageFading = useAutoDismissMessage(statusMessage, setStatusMessage, 5000, 500);
+  const statusMessageFading = useAutoDismissMessage(
+    statusMessage,
+    setStatusMessage,
+    5000,
+    500,
+  );
 
   const stageOptions = [
     "Draft",
@@ -93,12 +106,25 @@ export default function QuoteDetail() {
 
   const headerAliases: Record<string, string[]> = {
     first_name: ["first name", "firstname", "first_name", "fname", "given"],
-    last_name: ["last name", "lastname", "last_name", "lname", "surname", "family"],
+    last_name: [
+      "last name",
+      "lastname",
+      "last_name",
+      "lname",
+      "surname",
+      "family",
+    ],
     dob: ["dob", "date of birth", "birthdate", "birth date"],
     zip: ["zip", "zip code", "zipcode", "postal", "postal code"],
     gender: ["gender", "sex"],
     relationship: ["relationship", "rel", "relation"],
-    enrollment_tier: ["enrollment tier", "tier", "coverage tier", "enrollment", "coverage"],
+    enrollment_tier: [
+      "enrollment tier",
+      "tier",
+      "coverage tier",
+      "enrollment",
+      "coverage",
+    ],
   };
 
   const normalizeHeader = (value: string) =>
@@ -109,7 +135,7 @@ export default function QuoteDetail() {
     samples: Record<string, string[]>,
     rows: Record<string, any>[],
     total: number,
-    issues: number
+    issues: number,
   ) => {
     setDetectedHeaders(headers);
     setSampleData(samples || {});
@@ -130,12 +156,12 @@ export default function QuoteDetail() {
           const normalizedAliases = aliases.map(normalizeHeader);
 
           let match = normalizedHeaders.find((h) =>
-            normalizedAliases.includes(h.norm)
+            normalizedAliases.includes(h.norm),
           )?.raw;
 
           if (!match) {
             match = normalizedHeaders.find((h) =>
-              normalizedAliases.some((alias) => h.norm.includes(alias))
+              normalizedAliases.some((alias) => h.norm.includes(alias)),
             )?.raw;
           }
 
@@ -224,7 +250,11 @@ export default function QuoteDetail() {
   useEffect(() => {
     resetGroupDraft(data?.quote);
     if (data?.quote?.status) {
-      setStageDraft(data.quote.status === "Submitted" ? "Quote Submitted" : data.quote.status);
+      setStageDraft(
+        data.quote.status === "Submitted"
+          ? "Quote Submitted"
+          : data.quote.status,
+      );
     }
     setManualNetworkDraft(data?.quote?.manual_network || "");
     setProposalUrlDraft(data?.quote?.proposal_url || "");
@@ -247,13 +277,17 @@ export default function QuoteDetail() {
           result.sample_data || {},
           result.sample_rows || [],
           result.total_rows || 0,
-          result.issue_rows || 0
+          result.issue_rows || 0,
         );
         refresh();
         if (shouldSubmit && result.issue_count === 0) {
           return updateQuote(quoteId, { status: "Quote Submitted" })
             .then(() => assignNetwork(quoteId))
-            .then(() => setStatusMessage("Submission complete. Network assignment started."))
+            .then(() =>
+              setStatusMessage(
+                "Submission complete. Network assignment started.",
+              ),
+            )
             .then(() => setWizardOpen(false))
             .then(() => refresh())
             .then(() => setTimeout(jumpToAssignment, 200));
@@ -275,18 +309,19 @@ export default function QuoteDetail() {
   }, [data]);
 
   const coverageRows = useMemo(
-    () => Object.entries(latestAssignment?.result_json.coverage_by_network || {}),
-    [latestAssignment]
+    () =>
+      Object.entries(latestAssignment?.result_json.coverage_by_network || {}),
+    [latestAssignment],
   );
 
   const coveragePagination = useMemo(
     () => paginateItems(coverageRows, coveragePage),
-    [coverageRows, coveragePage]
+    [coverageRows, coveragePage],
   );
 
   const wizardIssuesPagination = useMemo(
     () => paginateItems(wizardIssues, wizardIssuesPage),
-    [wizardIssues, wizardIssuesPage]
+    [wizardIssues, wizardIssuesPage],
   );
 
   useEffect(() => {
@@ -312,7 +347,11 @@ export default function QuoteDetail() {
       refresh();
     } catch (err: any) {
       setError(err.message);
-      setStageDraft(data?.quote?.status === "Submitted" ? "Quote Submitted" : (data?.quote?.status || "Draft"));
+      setStageDraft(
+        data?.quote?.status === "Submitted"
+          ? "Quote Submitted"
+          : data?.quote?.status || "Draft",
+      );
     } finally {
       setBusy(false);
     }
@@ -368,7 +407,7 @@ export default function QuoteDetail() {
         result.sample_data || {},
         result.sample_rows || [],
         result.total_rows || 0,
-        result.issue_rows || 0
+        result.issue_rows || 0,
       );
       refresh();
     } catch (err: any) {
@@ -453,7 +492,10 @@ export default function QuoteDetail() {
     setBusy(true);
     setError(null);
     try {
-      const installation = await convertToInstallation(quoteId, { role, email });
+      const installation = await convertToInstallation(quoteId, {
+        role,
+        email,
+      });
       setStatusMessage("Case marked sold and moved to implementation.");
       refresh();
       window.location.href = `/implementations/${installation.id}`;
@@ -466,14 +508,16 @@ export default function QuoteDetail() {
 
   const handleUpload = async (
     event: React.ChangeEvent<HTMLInputElement>,
-    uploadType: string
+    uploadType: string,
   ) => {
     const files = Array.from(event.target.files || []);
     if (!files.length) return;
     setBusy(true);
     setError(null);
     try {
-      await Promise.all(files.map((file) => uploadFile(quoteId, file, uploadType)));
+      await Promise.all(
+        files.map((file) => uploadFile(quoteId, file, uploadType)),
+      );
       setStatusMessage("Upload complete.");
       refresh();
     } catch (err: any) {
@@ -484,14 +528,16 @@ export default function QuoteDetail() {
   };
 
   const handleWizardCensusUpload = async (
-    event: React.ChangeEvent<HTMLInputElement>
+    event: React.ChangeEvent<HTMLInputElement>,
   ) => {
     const files = Array.from(event.target.files || []);
     if (!files.length) return;
     setBusy(true);
     setError(null);
     try {
-      await Promise.all(files.map((file) => uploadFile(quoteId, file, "census")));
+      await Promise.all(
+        files.map((file) => uploadFile(quoteId, file, "census")),
+      );
       const result = await standardizeQuote(quoteId, {
         ...buildMappings(),
         header_map: headerMappings,
@@ -503,7 +549,7 @@ export default function QuoteDetail() {
         result.sample_data || {},
         result.sample_rows || [],
         result.total_rows || 0,
-        result.issue_rows || 0
+        result.issue_rows || 0,
       );
       refresh();
     } catch (err: any) {
@@ -515,7 +561,9 @@ export default function QuoteDetail() {
 
   const handleDeleteUpload = async (uploadId: string) => {
     if (!quoteId) return;
-    const confirmed = window.confirm("Delete this file? This cannot be undone.");
+    const confirmed = window.confirm(
+      "Delete this file? This cannot be undone.",
+    );
     if (!confirmed) return;
     setBusy(true);
     setError(null);
@@ -533,7 +581,7 @@ export default function QuoteDetail() {
   const handleClearCensus = async () => {
     if (!quoteId) return;
     const censusUploads = (data?.uploads || []).filter(
-      (upload) => upload.type === "census"
+      (upload) => upload.type === "census",
     );
     if (censusUploads.length === 0) {
       setStatusMessage("No census file to remove.");
@@ -544,7 +592,9 @@ export default function QuoteDetail() {
     setBusy(true);
     setError(null);
     try {
-      await Promise.all(censusUploads.map((upload) => deleteUpload(quoteId, upload.id)));
+      await Promise.all(
+        censusUploads.map((upload) => deleteUpload(quoteId, upload.id)),
+      );
       setWizardIssues([]);
       setWizardStatus(null);
       setDetectedHeaders([]);
@@ -605,7 +655,9 @@ export default function QuoteDetail() {
     setBusy(true);
     setError(null);
     try {
-      await updateQuote(quoteId, { proposal_url: proposalUrlDraft.trim() || null });
+      await updateQuote(quoteId, {
+        proposal_url: proposalUrlDraft.trim() || null,
+      });
       setStatusMessage("Proposal link updated.");
       refresh();
     } catch (err: any) {
@@ -619,7 +671,9 @@ export default function QuoteDetail() {
     setBusy(true);
     setError(null);
     try {
-      await updateQuote(quoteId, { manual_network: manualNetworkDraft.trim() || null });
+      await updateQuote(quoteId, {
+        manual_network: manualNetworkDraft.trim() || null,
+      });
       setStatusMessage("Manual network override saved.");
       refresh();
     } catch (err: any) {
@@ -635,7 +689,7 @@ export default function QuoteDetail() {
     try {
       const result = await syncQuoteFromHubSpot(quoteId);
       setStatusMessage(
-        `Synced from HubSpot. Ticket stage: ${result.ticket_stage || "n/a"} · Quote status: ${result.quote_status}`
+        `Synced from HubSpot. Ticket stage: ${result.ticket_stage || "n/a"} · Quote status: ${result.quote_status}`,
       );
       refresh();
     } catch (err: any) {
@@ -651,9 +705,10 @@ export default function QuoteDetail() {
 
   const { quote, uploads, proposals } = data;
   const hubSpotSyncPending = isHubSpotSyncPending(quote);
-  const manualOptions = quote.manual_network && !networkOptions.includes(quote.manual_network)
-    ? [quote.manual_network, ...networkOptions]
-    : networkOptions;
+  const manualOptions =
+    quote.manual_network && !networkOptions.includes(quote.manual_network)
+      ? [quote.manual_network, ...networkOptions]
+      : networkOptions;
   const uploadUrl = (path: string) => {
     const basename = path.split("/").pop() || path;
     return `/uploads/${quote.id}/${basename}`;
@@ -664,7 +719,9 @@ export default function QuoteDetail() {
       <h2>Quote Detail</h2>
       {error && <div className="notice">{error}</div>}
       {statusMessage && (
-        <div className={`notice notice-success ${statusMessageFading ? "fade-out" : ""}`}>
+        <div
+          className={`notice notice-success ${statusMessageFading ? "fade-out" : ""}`}
+        >
           {statusMessage}
         </div>
       )}
@@ -749,7 +806,9 @@ export default function QuoteDetail() {
             Employer Name
             <input
               value={groupDraft.company}
-              onChange={(e) => handleGroupDraftChange("company", e.target.value)}
+              onChange={(e) =>
+                handleGroupDraftChange("company", e.target.value)
+              }
             />
           </label>
           <label>
@@ -765,7 +824,9 @@ export default function QuoteDetail() {
             Employer City
             <input
               value={groupDraft.employer_city}
-              onChange={(e) => handleGroupDraftChange("employer_city", e.target.value)}
+              onChange={(e) =>
+                handleGroupDraftChange("employer_city", e.target.value)
+              }
             />
           </label>
           <label>
@@ -779,7 +840,9 @@ export default function QuoteDetail() {
             Employer Zip Code
             <input
               value={groupDraft.employer_zip}
-              onChange={(e) => handleGroupDraftChange("employer_zip", e.target.value)}
+              onChange={(e) =>
+                handleGroupDraftChange("employer_zip", e.target.value)
+              }
             />
           </label>
           <label>
@@ -806,7 +869,9 @@ export default function QuoteDetail() {
             Employer SIC
             <input
               value={groupDraft.employer_sic}
-              onChange={(e) => handleGroupDraftChange("employer_sic", e.target.value)}
+              onChange={(e) =>
+                handleGroupDraftChange("employer_sic", e.target.value)
+              }
             />
           </label>
           <label>
@@ -849,7 +914,11 @@ export default function QuoteDetail() {
             />
           </label>
           <div className="inline-actions">
-            <button className="button" onClick={handleGroupSave} disabled={busy}>
+            <button
+              className="button"
+              onClick={handleGroupSave}
+              disabled={busy}
+            >
               Save Changes
             </button>
             <button
@@ -907,19 +976,23 @@ export default function QuoteDetail() {
       </div>
 
       <h3 style={{ marginTop: 20 }}>High Cost Claimants</h3>
-      <div className="notice">{quote.high_cost_info || "No details provided."}</div>
+      <div className="notice">
+        {quote.high_cost_info || "No details provided."}
+      </div>
 
       <section className="section" style={{ marginTop: 24 }}>
         <h2>Census</h2>
         <div className="card-row">
           <div>
             <strong>
-              {latestStandardization ? latestStandardization.status : "No Census Uploaded"}
+              {latestStandardization
+                ? latestStandardization.status
+                : "No Census Uploaded"}
             </strong>
             <div className="helper">
               {latestStandardization
                 ? `${latestStandardization.issue_count} issue(s) · ${new Date(
-                    latestStandardization.created_at
+                    latestStandardization.created_at,
                   ).toLocaleString()}`
                 : "Upload a census to get started."}
             </div>
@@ -948,7 +1021,12 @@ export default function QuoteDetail() {
                 ))}
               </select>
             </label>
-            <button className="button secondary" type="button" onClick={handleManualNetworkSave} disabled={busy}>
+            <button
+              className="button secondary"
+              type="button"
+              onClick={handleManualNetworkSave}
+              disabled={busy}
+            >
               Save Override
             </button>
           </div>
@@ -961,8 +1039,11 @@ export default function QuoteDetail() {
                 {quote.manual_network
                   ? formatNetworkLabel(quote.manual_network)
                   : latestAssignment?.result_json.group_summary
-                  ? formatNetworkLabel(latestAssignment.result_json.group_summary.primary_network)
-                  : formatNetworkLabel(latestAssignment?.recommendation)}
+                    ? formatNetworkLabel(
+                        latestAssignment.result_json.group_summary
+                          .primary_network,
+                      )
+                    : formatNetworkLabel(latestAssignment?.recommendation)}
               </span>
               <strong>
                 {latestAssignment?.result_json.group_summary
@@ -972,15 +1053,18 @@ export default function QuoteDetail() {
               <span>
                 {latestAssignment?.result_json.group_summary
                   ? `${Math.round(
-                      latestAssignment.result_json.group_summary.coverage_percentage * 100
+                      latestAssignment.result_json.group_summary
+                        .coverage_percentage * 100,
                     )}%`
                   : latestAssignment
-                  ? `${Math.round(latestAssignment.confidence * 100)}%`
-                  : "—"}
+                    ? `${Math.round(latestAssignment.confidence * 100)}%`
+                    : "—"}
               </span>
               <strong>Confidence</strong>
               <span>
-                {latestAssignment ? `${Math.round(latestAssignment.confidence * 100)}%` : "—"}
+                {latestAssignment
+                  ? `${Math.round(latestAssignment.confidence * 100)}%`
+                  : "—"}
               </span>
               <strong>Rationale</strong>
               <span>
@@ -990,7 +1074,11 @@ export default function QuoteDetail() {
               </span>
             </div>
             <div className="inline-actions" style={{ marginBottom: 12 }}>
-              <button className="button secondary" onClick={handleAssign} disabled={busy}>
+              <button
+                className="button secondary"
+                onClick={handleAssign}
+                disabled={busy}
+              >
                 Refresh Network Assignment
               </button>
             </div>
@@ -1002,35 +1090,43 @@ export default function QuoteDetail() {
                     <div className="helper">
                       {quote.manual_network
                         ? `${formatNetworkLabel(quote.manual_network)} (manual override)`
-                        : formatNetworkLabel(latestAssignment.result_json.group_summary.primary_network)}
+                        : formatNetworkLabel(
+                            latestAssignment.result_json.group_summary
+                              .primary_network,
+                          )}
                     </div>
                   </div>
                   <div className="helper">
                     Coverage:{" "}
                     {Math.round(
-                      latestAssignment.result_json.group_summary.coverage_percentage * 100
+                      latestAssignment.result_json.group_summary
+                        .coverage_percentage * 100,
                     )}
                     % · Members counted:{" "}
                     {latestAssignment.result_json.group_summary.total_members}
                   </div>
                 </div>
                 {latestAssignment && (
-                  <table className="table">
-                    <thead>
-                      <tr>
-                        <th>Network</th>
-                        <th>Coverage</th>
-                      </tr>
-                    </thead>
-                    <tbody>
-                      {coveragePagination.pageItems.map(([network, coverage]) => (
-                        <tr key={network}>
-                          <td>{formatNetworkLabel(network)}</td>
-                          <td>{Math.round(Number(coverage) * 100)}%</td>
+                  <div className="table-scroll">
+                    <table className="table">
+                      <thead>
+                        <tr>
+                          <th>Network</th>
+                          <th>Coverage</th>
                         </tr>
-                      ))}
-                    </tbody>
-                  </table>
+                      </thead>
+                      <tbody>
+                        {coveragePagination.pageItems.map(
+                          ([network, coverage]) => (
+                            <tr key={network}>
+                              <td>{formatNetworkLabel(network)}</td>
+                              <td>{Math.round(Number(coverage) * 100)}%</td>
+                            </tr>
+                          ),
+                        )}
+                      </tbody>
+                    </table>
+                  </div>
                 )}
                 {latestAssignment && (
                   <TablePagination
@@ -1039,10 +1135,14 @@ export default function QuoteDetail() {
                     onPageChange={setCoveragePage}
                   />
                 )}
-                {latestAssignment.result_json.group_summary.invalid_rows?.length > 0 && (
+                {latestAssignment.result_json.group_summary.invalid_rows
+                  ?.length > 0 && (
                   <div className="notice" style={{ marginTop: 12 }}>
-                    {latestAssignment.result_json.group_summary.invalid_rows.length} row(s)
-                    had invalid ZIPs and were excluded from coverage.
+                    {
+                      latestAssignment.result_json.group_summary.invalid_rows
+                        .length
+                    }{" "}
+                    row(s) had invalid ZIPs and were excluded from coverage.
                   </div>
                 )}
               </>
@@ -1066,19 +1166,35 @@ export default function QuoteDetail() {
         <div className="form-grid">
           <label>
             Add Census
-            <input type="file" multiple onChange={(e) => handleUpload(e, "census")} />
+            <input
+              type="file"
+              multiple
+              onChange={(e) => handleUpload(e, "census")}
+            />
           </label>
           <label>
             Renewal
-            <input type="file" multiple onChange={(e) => handleUpload(e, "renewal")} />
+            <input
+              type="file"
+              multiple
+              onChange={(e) => handleUpload(e, "renewal")}
+            />
           </label>
           <label>
             SBC
-            <input type="file" multiple onChange={(e) => handleUpload(e, "sbc")} />
+            <input
+              type="file"
+              multiple
+              onChange={(e) => handleUpload(e, "sbc")}
+            />
           </label>
           <label>
             Claims
-            <input type="file" multiple onChange={(e) => handleUpload(e, "claims")} />
+            <input
+              type="file"
+              multiple
+              onChange={(e) => handleUpload(e, "claims")}
+            />
           </label>
         </div>
         {uploads.length === 0 && <div className="helper">No uploads yet.</div>}
@@ -1120,7 +1236,11 @@ export default function QuoteDetail() {
                 View Proposal
               </a>
             ) : (
-              <button className="button proposal-disabled proposal-action" type="button" disabled>
+              <button
+                className="button proposal-disabled proposal-action"
+                type="button"
+                disabled
+              >
                 View Proposal
               </button>
             )}
@@ -1144,12 +1264,19 @@ export default function QuoteDetail() {
                 onChange={(e) => setProposalUrlDraft(e.target.value)}
               />
             </label>
-            <button className="button secondary" type="button" onClick={handleProposalUrlSave} disabled={busy}>
+            <button
+              className="button secondary"
+              type="button"
+              onClick={handleProposalUrlSave}
+              disabled={busy}
+            >
               Save Link
             </button>
           </div>
         )}
-        {proposals.length === 0 && <div className="helper">No proposals yet.</div>}
+        {proposals.length === 0 && (
+          <div className="helper">No proposals yet.</div>
+        )}
         {proposals.map((proposal) => (
           <div key={proposal.id} className="card-row">
             <div>
@@ -1174,7 +1301,10 @@ export default function QuoteDetail() {
           <div className="modal" onClick={(e) => e.stopPropagation()}>
             <div className="modal-header">
               <h2>Census</h2>
-              <button className="button ghost" onClick={() => setWizardOpen(false)}>
+              <button
+                className="button ghost"
+                onClick={() => setWizardOpen(false)}
+              >
                 Close
               </button>
             </div>
@@ -1191,8 +1321,8 @@ export default function QuoteDetail() {
                 onChange={handleWizardCensusUpload}
               />
               <span className="helper">
-                We’ll automatically standardize it and surface anything that needs
-                attention.
+                We’ll automatically standardize it and surface anything that
+                needs attention.
               </span>
             </label>
             <div className="inline-actions" style={{ marginTop: 10 }}>
@@ -1210,9 +1340,9 @@ export default function QuoteDetail() {
               <div className="wizard-layout">
                 <aside className="wizard-sidebar">
                   <div className="wizard-note">
-                    Please ensure your census file can be converted to Level Health's
-                    census format. Map each uploaded column to the expected field.
-                    Supported files: .csv, .xls, .xlsx.
+                    Please ensure your census file can be converted to Level
+                    Health's census format. Map each uploaded column to the
+                    expected field. Supported files: .csv, .xls, .xlsx.
                   </div>
                   <h4>Required Columns</h4>
                   {Object.entries(requiredHeaderLabels).map(([key, label]) => {
@@ -1220,7 +1350,9 @@ export default function QuoteDetail() {
                     return (
                       <div key={key} className="required-item">
                         <span>{label}</span>
-                        <span className={`wizard-check ${mapped ? "ok" : "warn"}`}>
+                        <span
+                          className={`wizard-check ${mapped ? "ok" : "warn"}`}
+                        >
                           {mapped ? "✓" : "!"}
                         </span>
                       </div>
@@ -1235,14 +1367,16 @@ export default function QuoteDetail() {
                   </header>
                   {detectedHeaders.length === 0 && (
                     <div className="wizard-row">
-                      <div className="helper">Upload a census to see columns.</div>
+                      <div className="helper">
+                        Upload a census to see columns.
+                      </div>
                       <div />
                       <div />
                     </div>
                   )}
                   {detectedHeaders.map((header) => {
                     const mappedField = Object.entries(headerMappings).find(
-                      ([, value]) => value === header
+                      ([, value]) => value === header,
                     )?.[0];
                     return (
                       <div key={header} className="wizard-row">
@@ -1277,11 +1411,13 @@ export default function QuoteDetail() {
                             }}
                           >
                             <option value="">Unmapped</option>
-                            {Object.entries(requiredHeaderLabels).map(([key, label]) => (
-                              <option key={key} value={key}>
-                                {label} (required)
-                              </option>
-                            ))}
+                            {Object.entries(requiredHeaderLabels).map(
+                              ([key, label]) => (
+                                <option key={key} value={key}>
+                                  {label} (required)
+                                </option>
+                              ),
+                            )}
                           </select>
                         </div>
                       </div>
@@ -1305,7 +1441,11 @@ export default function QuoteDetail() {
                 >
                   Save Corrections
                 </button>
-                <button className="button" onClick={handleWizardSubmit} disabled={busy}>
+                <button
+                  className="button"
+                  onClick={handleWizardSubmit}
+                  disabled={busy}
+                >
                   Submit
                 </button>
               </div>
@@ -1349,92 +1489,99 @@ export default function QuoteDetail() {
               )}
               {wizardIssues.length > 0 && (
                 <>
-                  <table className="table elegant slim">
-                    <thead>
-                      <tr>
-                        <th>Row</th>
-                        <th>Field</th>
-                        <th>Value</th>
-                        <th>Mapped Value</th>
-                        <th>Issue</th>
-                      </tr>
-                    </thead>
-                    <tbody>
-                      {wizardIssuesPagination.pageItems.map((issue, index) => {
-                        const issueIndex = wizardIssuesPagination.startItem + index - 1;
-                        return (
-                          <tr key={`${issue.row}-${issue.field}-${issueIndex}`}>
-                            <td>
-                              <input
-                                type="number"
-                                value={issue.row}
-                                onChange={(e) => {
-                                  const next = [...wizardIssues];
-                                  next[issueIndex] = {
-                                    ...issue,
-                                    row: Number(e.target.value),
-                                  };
-                                  setWizardIssues(next);
-                                }}
-                              />
-                            </td>
-                            <td>
-                              <input
-                                value={issue.field}
-                                onChange={(e) => {
-                                  const next = [...wizardIssues];
-                                  next[issueIndex] = {
-                                    ...issue,
-                                    field: e.target.value,
-                                  };
-                                  setWizardIssues(next);
-                                }}
-                              />
-                            </td>
-                            <td>
-                              <input
-                                value={issue.value || ""}
-                                onChange={(e) => {
-                                  const next = [...wizardIssues];
-                                  next[issueIndex] = {
-                                    ...issue,
-                                    value: e.target.value,
-                                  };
-                                  setWizardIssues(next);
-                                }}
-                              />
-                            </td>
-                            <td>
-                              <input
-                                value={issue.mapped_value || ""}
-                                onChange={(e) => {
-                                  const next = [...wizardIssues];
-                                  next[issueIndex] = {
-                                    ...issue,
-                                    mapped_value: e.target.value,
-                                  };
-                                  setWizardIssues(next);
-                                }}
-                              />
-                            </td>
-                            <td>
-                              <input
-                                value={issue.issue}
-                                onChange={(e) => {
-                                  const next = [...wizardIssues];
-                                  next[issueIndex] = {
-                                    ...issue,
-                                    issue: e.target.value,
-                                  };
-                                  setWizardIssues(next);
-                                }}
-                              />
-                            </td>
-                          </tr>
-                        );
-                      })}
-                    </tbody>
-                  </table>
+                  <div className="table-scroll">
+                    <table className="table elegant slim">
+                      <thead>
+                        <tr>
+                          <th>Row</th>
+                          <th>Field</th>
+                          <th>Value</th>
+                          <th>Mapped Value</th>
+                          <th>Issue</th>
+                        </tr>
+                      </thead>
+                      <tbody>
+                        {wizardIssuesPagination.pageItems.map(
+                          (issue, index) => {
+                            const issueIndex =
+                              wizardIssuesPagination.startItem + index - 1;
+                            return (
+                              <tr
+                                key={`${issue.row}-${issue.field}-${issueIndex}`}
+                              >
+                                <td>
+                                  <input
+                                    type="number"
+                                    value={issue.row}
+                                    onChange={(e) => {
+                                      const next = [...wizardIssues];
+                                      next[issueIndex] = {
+                                        ...issue,
+                                        row: Number(e.target.value),
+                                      };
+                                      setWizardIssues(next);
+                                    }}
+                                  />
+                                </td>
+                                <td>
+                                  <input
+                                    value={issue.field}
+                                    onChange={(e) => {
+                                      const next = [...wizardIssues];
+                                      next[issueIndex] = {
+                                        ...issue,
+                                        field: e.target.value,
+                                      };
+                                      setWizardIssues(next);
+                                    }}
+                                  />
+                                </td>
+                                <td>
+                                  <input
+                                    value={issue.value || ""}
+                                    onChange={(e) => {
+                                      const next = [...wizardIssues];
+                                      next[issueIndex] = {
+                                        ...issue,
+                                        value: e.target.value,
+                                      };
+                                      setWizardIssues(next);
+                                    }}
+                                  />
+                                </td>
+                                <td>
+                                  <input
+                                    value={issue.mapped_value || ""}
+                                    onChange={(e) => {
+                                      const next = [...wizardIssues];
+                                      next[issueIndex] = {
+                                        ...issue,
+                                        mapped_value: e.target.value,
+                                      };
+                                      setWizardIssues(next);
+                                    }}
+                                  />
+                                </td>
+                                <td>
+                                  <input
+                                    value={issue.issue}
+                                    onChange={(e) => {
+                                      const next = [...wizardIssues];
+                                      next[issueIndex] = {
+                                        ...issue,
+                                        issue: e.target.value,
+                                      };
+                                      setWizardIssues(next);
+                                    }}
+                                  />
+                                </td>
+                              </tr>
+                            );
+                          },
+                        )}
+                      </tbody>
+                    </table>
+                  </div>
                   <TablePagination
                     page={wizardIssuesPagination.currentPage}
                     totalItems={wizardIssues.length}
@@ -1443,7 +1590,6 @@ export default function QuoteDetail() {
                 </>
               )}
             </section>
-
           </div>
         </div>
       )}

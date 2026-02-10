@@ -72,12 +72,17 @@ export default function OrganizationDetail() {
   }, [page, pagination.currentPage]);
 
   if (!organization) {
-    return <div className="section">{error ? error : "Loading organization..."}</div>;
+    return (
+      <div className="section">{error ? error : "Loading organization..."}</div>
+    );
   }
 
   return (
     <section className="section">
-      <div className="inline-actions" style={{ justifyContent: "space-between", marginBottom: 8 }}>
+      <div
+        className="inline-actions"
+        style={{ justifyContent: "space-between", marginBottom: 8 }}
+      >
         <h2 style={{ margin: 0 }}>Organization Detail</h2>
         <Link className="button ghost" to="/admin/organizations">
           Back to Organizations
@@ -90,7 +95,9 @@ export default function OrganizationDetail() {
         <strong>Name</strong>
         <span>{organization.name}</span>
         <strong>Type</strong>
-        <span>{organization.type === "broker" ? "Broker" : "Plan Sponsor"}</span>
+        <span>
+          {organization.type === "broker" ? "Broker" : "Plan Sponsor"}
+        </span>
         <strong>Domain</strong>
         <span>{organization.domain}</span>
         <strong>Created</strong>
@@ -99,35 +106,37 @@ export default function OrganizationDetail() {
 
       <section className="section" style={{ marginTop: 20 }}>
         <h3>Associated Users</h3>
-        <table className="table">
-          <thead>
-            <tr>
-              <th>Name</th>
-              <th>Email</th>
-              <th>Phone</th>
-              <th>Title</th>
-              <th>Role</th>
-            </tr>
-          </thead>
-          <tbody>
-            {pagination.pageItems.map((user) => (
-              <tr key={user.id}>
-                <td>{`${user.first_name} ${user.last_name}`.trim()}</td>
-                <td>{user.email}</td>
-                <td>{user.phone || "—"}</td>
-                <td>{user.job_title}</td>
-                <td>{user.role}</td>
-              </tr>
-            ))}
-            {users.length === 0 && (
+        <div className="table-scroll">
+          <table className="table">
+            <thead>
               <tr>
-                <td className="helper" colSpan={5}>
-                  No users associated with this organization.
-                </td>
+                <th>Name</th>
+                <th>Email</th>
+                <th>Phone</th>
+                <th>Title</th>
+                <th>Role</th>
               </tr>
-            )}
-          </tbody>
-        </table>
+            </thead>
+            <tbody>
+              {pagination.pageItems.map((user) => (
+                <tr key={user.id}>
+                  <td>{`${user.first_name} ${user.last_name}`.trim()}</td>
+                  <td>{user.email}</td>
+                  <td>{user.phone || "—"}</td>
+                  <td>{user.job_title}</td>
+                  <td>{user.role}</td>
+                </tr>
+              ))}
+              {users.length === 0 && (
+                <tr>
+                  <td className="helper" colSpan={5}>
+                    No users associated with this organization.
+                  </td>
+                </tr>
+              )}
+            </tbody>
+          </table>
+        </div>
         <TablePagination
           page={pagination.currentPage}
           totalItems={users.length}

@@ -11,7 +11,12 @@ type MultiSelectDropdownProps = {
   onChange: (values: string[]) => void;
 };
 
-function MultiSelectDropdown({ label, options, selected, onChange }: MultiSelectDropdownProps) {
+function MultiSelectDropdown({
+  label,
+  options,
+  selected,
+  onChange,
+}: MultiSelectDropdownProps) {
   const toggle = (value: string) => {
     if (selected.includes(value)) {
       onChange(selected.filter((item) => item !== value));
@@ -21,7 +26,11 @@ function MultiSelectDropdown({ label, options, selected, onChange }: MultiSelect
   };
 
   const summary =
-    selected.length === 0 ? "All" : selected.length === 1 ? selected[0] : `${selected.length} selected`;
+    selected.length === 0
+      ? "All"
+      : selected.length === 1
+        ? selected[0]
+        : `${selected.length} selected`;
 
   return (
     <div className="multi-dropdown-field">
@@ -36,7 +45,9 @@ function MultiSelectDropdown({ label, options, selected, onChange }: MultiSelect
               className={`multi-dropdown-option ${selected.includes(option) ? "selected" : ""}`}
               onClick={() => toggle(option)}
             >
-              <span className="multi-dropdown-check">{selected.includes(option) ? "✓" : ""}</span>
+              <span className="multi-dropdown-check">
+                {selected.includes(option) ? "✓" : ""}
+              </span>
               <span>{option}</span>
             </button>
           ))}
@@ -63,14 +74,20 @@ function formatDueDate(value: string | null): string {
   if (!value) return "No due date";
   const parsed = parseDateOnly(value);
   if (!parsed) return value;
-  return parsed.toLocaleDateString(undefined, { month: "short", day: "numeric", year: "numeric" });
+  return parsed.toLocaleDateString(undefined, {
+    month: "short",
+    day: "numeric",
+    year: "numeric",
+  });
 }
 
 function dueDescriptor(value: string | null): string {
   const parsed = parseDateOnly(value);
   if (!parsed) return "No due date";
   const msPerDay = 24 * 60 * 60 * 1000;
-  const days = Math.floor((parsed.getTime() - startOfToday().getTime()) / msPerDay);
+  const days = Math.floor(
+    (parsed.getTime() - startOfToday().getTime()) / msPerDay,
+  );
   if (days < 0) return `${Math.abs(days)}d overdue`;
   if (days === 0) return "Due today";
   if (days === 1) return "Due tomorrow";
@@ -85,13 +102,21 @@ export default function Tasks() {
   const [error, setError] = useState<string | null>(null);
   const [statusMessage, setStatusMessage] = useState<string | null>(null);
   const [savingTaskId, setSavingTaskId] = useState<string | null>(null);
-  const [dueDateDrafts, setDueDateDrafts] = useState<Record<string, string>>({});
-  const [assignedUserDrafts, setAssignedUserDrafts] = useState<Record<string, string>>({});
+  const [dueDateDrafts, setDueDateDrafts] = useState<Record<string, string>>(
+    {},
+  );
+  const [assignedUserDrafts, setAssignedUserDrafts] = useState<
+    Record<string, string>
+  >({});
   const [stateFilters, setStateFilters] = useState<string[]>([]);
   const [ownerFilters, setOwnerFilters] = useState<string[]>([]);
-  const [dueFilter, setDueFilter] = useState<"all" | "overdue" | "today" | "week" | "no_due">("all");
+  const [dueFilter, setDueFilter] = useState<
+    "all" | "overdue" | "today" | "week" | "no_due"
+  >("all");
   const [companySearch, setCompanySearch] = useState("");
-  const [sortBy, setSortBy] = useState<"due_date" | "state" | "owner" | "company">("due_date");
+  const [sortBy, setSortBy] = useState<
+    "due_date" | "state" | "owner" | "company"
+  >("due_date");
   const [sortDirection, setSortDirection] = useState<"asc" | "desc">("asc");
   const [page, setPage] = useState(1);
   const filtersRef = useRef<HTMLDivElement | null>(null);
@@ -119,7 +144,11 @@ export default function Tasks() {
   useEffect(() => {
     const handleOutsideClick = (event: MouseEvent) => {
       const target = event.target as Node | null;
-      if (!filtersRef.current || (target && filtersRef.current.contains(target))) return;
+      if (
+        !filtersRef.current ||
+        (target && filtersRef.current.contains(target))
+      )
+        return;
       document
         .querySelectorAll<HTMLDetailsElement>(".multi-dropdown[open]")
         .forEach((el) => el.removeAttribute("open"));
@@ -130,19 +159,24 @@ export default function Tasks() {
 
   useEffect(() => {
     setDueDateDrafts(
-      Object.fromEntries(tasks.map((task) => [task.id, task.due_date || ""]))
+      Object.fromEntries(tasks.map((task) => [task.id, task.due_date || ""])),
     );
     setAssignedUserDrafts(
-      Object.fromEntries(tasks.map((task) => [task.id, task.assigned_user_id || ""]))
+      Object.fromEntries(
+        tasks.map((task) => [task.id, task.assigned_user_id || ""]),
+      ),
     );
   }, [tasks]);
 
   const userNameById = useMemo(
     () =>
       Object.fromEntries(
-        users.map((user) => [user.id, `${user.first_name} ${user.last_name}`.trim()])
+        users.map((user) => [
+          user.id,
+          `${user.first_name} ${user.last_name}`.trim(),
+        ]),
       ),
-    [users]
+    [users],
   );
 
   const handleSaveTaskMeta = async (task: Task) => {
@@ -151,7 +185,11 @@ export default function Tasks() {
     setStatusMessage(null);
     try {
       const dueDate = (dueDateDrafts[task.id] ?? task.due_date ?? "").trim();
-      const assignedUserId = (assignedUserDrafts[task.id] ?? task.assigned_user_id ?? "").trim();
+      const assignedUserId = (
+        assignedUserDrafts[task.id] ??
+        task.assigned_user_id ??
+        ""
+      ).trim();
       await updateTask(
         task.installation_id,
         task.id,
@@ -159,7 +197,7 @@ export default function Tasks() {
           due_date: dueDate || null,
           assigned_user_id: assignedUserId || null,
         },
-        { role, email }
+        { role, email },
       );
       setStatusMessage("Task assignment and due date updated.");
       await loadTasks();
@@ -172,7 +210,7 @@ export default function Tasks() {
 
   const handleDeleteTask = async (task: Task) => {
     const confirmed = window.confirm(
-      `Delete task "${task.title}" for ${task.installation_company || "this implementation"}?`
+      `Delete task "${task.title}" for ${task.installation_company || "this implementation"}?`,
     );
     if (!confirmed) return;
     setSavingTaskId(task.id);
@@ -190,13 +228,19 @@ export default function Tasks() {
   };
 
   const stateOptions = useMemo(
-    () => Array.from(new Set(tasks.map((task) => task.state))).sort((a, b) => a.localeCompare(b)),
-    [tasks]
+    () =>
+      Array.from(new Set(tasks.map((task) => task.state))).sort((a, b) =>
+        a.localeCompare(b),
+      ),
+    [tasks],
   );
 
   const ownerOptions = useMemo(
-    () => Array.from(new Set(tasks.map((task) => task.owner))).sort((a, b) => a.localeCompare(b)),
-    [tasks]
+    () =>
+      Array.from(new Set(tasks.map((task) => task.owner))).sort((a, b) =>
+        a.localeCompare(b),
+      ),
+    [tasks],
   );
 
   const visibleTasks = useMemo(() => {
@@ -206,26 +250,32 @@ export default function Tasks() {
       const taskCompany = task.installation_company || "";
       const dueDate = parseDateOnly(task.due_date);
       const dueDelta = dueDate
-        ? Math.floor((dueDate.getTime() - today.getTime()) / (24 * 60 * 60 * 1000))
+        ? Math.floor(
+            (dueDate.getTime() - today.getTime()) / (24 * 60 * 60 * 1000),
+          )
         : null;
 
-      const matchesState = stateFilters.length === 0 || stateFilters.includes(task.state);
-      const matchesOwner = ownerFilters.length === 0 || ownerFilters.includes(task.owner);
+      const matchesState =
+        stateFilters.length === 0 || stateFilters.includes(task.state);
+      const matchesOwner =
+        ownerFilters.length === 0 || ownerFilters.includes(task.owner);
       const matchesSearch =
         !companySearch.trim() ||
-        taskCompany.toLowerCase().includes(companySearch.trim().toLowerCase()) ||
+        taskCompany
+          .toLowerCase()
+          .includes(companySearch.trim().toLowerCase()) ||
         task.title.toLowerCase().includes(companySearch.trim().toLowerCase());
 
       const matchesDue =
         dueFilter === "all"
           ? true
           : dueFilter === "overdue"
-          ? dueDelta !== null && dueDelta < 0
-          : dueFilter === "today"
-          ? dueDelta !== null && dueDelta === 0
-          : dueFilter === "week"
-          ? dueDelta !== null && dueDelta >= 0 && dueDelta <= 7
-          : task.due_date === null;
+            ? dueDelta !== null && dueDelta < 0
+            : dueFilter === "today"
+              ? dueDelta !== null && dueDelta === 0
+              : dueFilter === "week"
+                ? dueDelta !== null && dueDelta >= 0 && dueDelta <= 7
+                : task.due_date === null;
 
       return matchesState && matchesOwner && matchesSearch && matchesDue;
     });
@@ -247,11 +297,20 @@ export default function Tasks() {
     });
 
     return sortDirection === "asc" ? sorted : sorted.reverse();
-  }, [tasks, stateFilters, ownerFilters, companySearch, dueFilter, sortBy, sortDirection]);
+  }, [
+    tasks,
+    stateFilters,
+    ownerFilters,
+    companySearch,
+    dueFilter,
+    sortBy,
+    sortDirection,
+  ]);
 
   const openCount = useMemo(
-    () => tasks.filter((task) => !["Done", "Complete"].includes(task.state)).length,
-    [tasks]
+    () =>
+      tasks.filter((task) => !["Done", "Complete"].includes(task.state)).length,
+    [tasks],
   );
 
   const overdueCount = useMemo(() => {
@@ -259,13 +318,16 @@ export default function Tasks() {
     return tasks.filter((task) => {
       const dueDate = parseDateOnly(task.due_date);
       if (!dueDate) return false;
-      return dueDate.getTime() < today.getTime() && !["Done", "Complete"].includes(task.state);
+      return (
+        dueDate.getTime() < today.getTime() &&
+        !["Done", "Complete"].includes(task.state)
+      );
     }).length;
   }, [tasks]);
 
   const pagination = useMemo(
     () => paginateItems(visibleTasks, page),
-    [visibleTasks, page]
+    [visibleTasks, page],
   );
 
   useEffect(() => {
@@ -277,7 +339,9 @@ export default function Tasks() {
   return (
     <section className="section">
       <h2>Tasks</h2>
-      {statusMessage && <div className="notice notice-success">{statusMessage}</div>}
+      {statusMessage && (
+        <div className="notice notice-success">{statusMessage}</div>
+      )}
       {error && <div className="notice">{error}</div>}
       <div className="grid grid-3" style={{ marginBottom: 12 }}>
         <div className="section" style={{ marginBottom: 0 }}>
@@ -294,7 +358,11 @@ export default function Tasks() {
         </div>
       </div>
 
-      <div ref={filtersRef} className="inline-actions" style={{ marginBottom: 12 }}>
+      <div
+        ref={filtersRef}
+        className="inline-actions"
+        style={{ marginBottom: 12 }}
+      >
         <MultiSelectDropdown
           label="State"
           options={stateOptions}
@@ -312,7 +380,14 @@ export default function Tasks() {
           <select
             value={dueFilter}
             onChange={(event) =>
-              setDueFilter(event.target.value as "all" | "overdue" | "today" | "week" | "no_due")
+              setDueFilter(
+                event.target.value as
+                  | "all"
+                  | "overdue"
+                  | "today"
+                  | "week"
+                  | "no_due",
+              )
             }
           >
             <option value="all">All</option>
@@ -335,7 +410,13 @@ export default function Tasks() {
           <select
             value={sortBy}
             onChange={(event) =>
-              setSortBy(event.target.value as "due_date" | "state" | "owner" | "company")
+              setSortBy(
+                event.target.value as
+                  | "due_date"
+                  | "state"
+                  | "owner"
+                  | "company",
+              )
             }
           >
             <option value="due_date">Due Date</option>
@@ -348,7 +429,9 @@ export default function Tasks() {
           Direction
           <select
             value={sortDirection}
-            onChange={(event) => setSortDirection(event.target.value as "asc" | "desc")}
+            onChange={(event) =>
+              setSortDirection(event.target.value as "asc" | "desc")
+            }
           >
             <option value="asc">Ascending</option>
             <option value="desc">Descending</option>
@@ -373,103 +456,112 @@ export default function Tasks() {
         </button>
       </div>
 
-      <table className="table">
-        <thead>
-          <tr>
-            <th>Task</th>
-            <th>Group</th>
-            <th>Owner</th>
-            <th>Assigned To</th>
-            <th>Due Date</th>
-            <th>State</th>
-            {isAdmin && <th>Admin</th>}
-            <th>Action</th>
-          </tr>
-        </thead>
-        <tbody>
-          {pagination.pageItems.map((task) => (
-            <tr key={task.id}>
-              <td>{task.title}</td>
-              <td>{task.installation_company || "—"}</td>
-              <td>{task.owner}</td>
-              <td>
-                {task.assigned_user_id
-                  ? userNameById[task.assigned_user_id] || task.assigned_user_id
-                  : "—"}
-              </td>
-              <td>
-                <div>{formatDueDate(task.due_date)}</div>
-                <div className="helper">{dueDescriptor(task.due_date)}</div>
-              </td>
-              <td>
-                <span className="badge primary">{task.state}</span>
-              </td>
-              {isAdmin && (
-                <td>
-                  <div className="task-actions" style={{ justifyContent: "flex-start" }}>
-                    <select
-                      value={assignedUserDrafts[task.id] ?? ""}
-                      onChange={(event) =>
-                        setAssignedUserDrafts((prev) => ({
-                          ...prev,
-                          [task.id]: event.target.value,
-                        }))
-                      }
-                      disabled={savingTaskId === task.id}
-                    >
-                      <option value="">Unassigned</option>
-                      {users.map((user) => (
-                        <option key={user.id} value={user.id}>
-                          {`${user.first_name} ${user.last_name}`.trim()}
-                        </option>
-                      ))}
-                    </select>
-                    <input
-                      type="date"
-                      value={dueDateDrafts[task.id] ?? ""}
-                      onChange={(event) =>
-                        setDueDateDrafts((prev) => ({
-                          ...prev,
-                          [task.id]: event.target.value,
-                        }))
-                      }
-                      disabled={savingTaskId === task.id}
-                    />
-                    <button
-                      className="button ghost"
-                      type="button"
-                      onClick={() => handleSaveTaskMeta(task)}
-                      disabled={savingTaskId === task.id}
-                    >
-                      Save
-                    </button>
-                    <button
-                      className="button"
-                      type="button"
-                      onClick={() => handleDeleteTask(task)}
-                      disabled={savingTaskId === task.id}
-                    >
-                      Delete
-                    </button>
-                  </div>
-                </td>
-              )}
-              <td>
-                <Link className="table-link" to={`/implementations/${task.installation_id}`}>
-                  Open
-                </Link>
-              </td>
-            </tr>
-          ))}
-          {visibleTasks.length === 0 && (
+      <div className="table-scroll">
+        <table className="table">
+          <thead>
             <tr>
-              <td colSpan={isAdmin ? 8 : 7} className="helper">
-                No tasks match current filters.
-              </td>
+              <th>Task</th>
+              <th>Group</th>
+              <th>Owner</th>
+              <th>Assigned To</th>
+              <th>Due Date</th>
+              <th>State</th>
+              {isAdmin && <th>Admin</th>}
+              <th>Action</th>
             </tr>
-          )}
-        </tbody>
-      </table>
+          </thead>
+          <tbody>
+            {pagination.pageItems.map((task) => (
+              <tr key={task.id}>
+                <td>{task.title}</td>
+                <td>{task.installation_company || "—"}</td>
+                <td>{task.owner}</td>
+                <td>
+                  {task.assigned_user_id
+                    ? userNameById[task.assigned_user_id] ||
+                      task.assigned_user_id
+                    : "—"}
+                </td>
+                <td>
+                  <div>{formatDueDate(task.due_date)}</div>
+                  <div className="helper">{dueDescriptor(task.due_date)}</div>
+                </td>
+                <td>
+                  <span className="badge primary">{task.state}</span>
+                </td>
+                {isAdmin && (
+                  <td>
+                    <div
+                      className="task-actions"
+                      style={{ justifyContent: "flex-start" }}
+                    >
+                      <select
+                        value={assignedUserDrafts[task.id] ?? ""}
+                        onChange={(event) =>
+                          setAssignedUserDrafts((prev) => ({
+                            ...prev,
+                            [task.id]: event.target.value,
+                          }))
+                        }
+                        disabled={savingTaskId === task.id}
+                      >
+                        <option value="">Unassigned</option>
+                        {users.map((user) => (
+                          <option key={user.id} value={user.id}>
+                            {`${user.first_name} ${user.last_name}`.trim()}
+                          </option>
+                        ))}
+                      </select>
+                      <input
+                        type="date"
+                        value={dueDateDrafts[task.id] ?? ""}
+                        onChange={(event) =>
+                          setDueDateDrafts((prev) => ({
+                            ...prev,
+                            [task.id]: event.target.value,
+                          }))
+                        }
+                        disabled={savingTaskId === task.id}
+                      />
+                      <button
+                        className="button ghost"
+                        type="button"
+                        onClick={() => handleSaveTaskMeta(task)}
+                        disabled={savingTaskId === task.id}
+                      >
+                        Save
+                      </button>
+                      <button
+                        className="button"
+                        type="button"
+                        onClick={() => handleDeleteTask(task)}
+                        disabled={savingTaskId === task.id}
+                      >
+                        Delete
+                      </button>
+                    </div>
+                  </td>
+                )}
+                <td>
+                  <Link
+                    className="table-link"
+                    to={`/implementations/${task.installation_id}`}
+                  >
+                    Open
+                  </Link>
+                </td>
+              </tr>
+            ))}
+            {visibleTasks.length === 0 && (
+              <tr>
+                <td colSpan={isAdmin ? 8 : 7} className="helper">
+                  No tasks match current filters.
+                </td>
+              </tr>
+            )}
+          </tbody>
+        </table>
+      </div>
       <TablePagination
         page={pagination.currentPage}
         totalItems={visibleTasks.length}

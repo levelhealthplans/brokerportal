@@ -143,41 +143,55 @@ export default function Configuration() {
   const [networkOptions, setNetworkOptions] = useState<string[]>([]);
   const [networkMappings, setNetworkMappings] = useState<NetworkMapping[]>([]);
   const [hubspotSettings, setHubspotSettings] = useState<HubSpotSettings>(
-    EMPTY_HUBSPOT_SETTINGS
+    EMPTY_HUBSPOT_SETTINGS,
   );
   const [hubspotTokenInput, setHubspotTokenInput] = useState("");
-  const [hubspotPipelines, setHubspotPipelines] = useState<HubSpotPipeline[]>([]);
-  const [hubspotTicketProperties, setHubspotTicketProperties] = useState<HubSpotTicketProperty[]>(
-    []
+  const [hubspotPipelines, setHubspotPipelines] = useState<HubSpotPipeline[]>(
+    [],
   );
+  const [hubspotTicketProperties, setHubspotTicketProperties] = useState<
+    HubSpotTicketProperty[]
+  >([]);
   const [hubspotMappingTab, setHubspotMappingTab] = useState<
     "fields" | "quote_to_stage" | "stage_to_quote"
   >("fields");
   const [fieldMappingQuery, setFieldMappingQuery] = useState("");
   const [showMappedFieldsOnly, setShowMappedFieldsOnly] = useState(false);
-  const [hubspotTestMessage, setHubspotTestMessage] = useState<string | null>(null);
-  const [hubspotPanelState, setHubspotPanelState] = useState<HubspotPanelState>(() =>
-    readHubspotPanelState()
+  const [hubspotTestMessage, setHubspotTestMessage] = useState<string | null>(
+    null,
+  );
+  const [hubspotPanelState, setHubspotPanelState] = useState<HubspotPanelState>(
+    () => readHubspotPanelState(),
   );
   const [settings, setSettings] = useState({
     default_network: "Cigna_PPO",
     coverage_threshold: 0.9,
   });
   const [newOption, setNewOption] = useState("");
-  const [editingOption, setEditingOption] = useState<Record<string, string>>({});
-  const [newMapping, setNewMapping] = useState({ zip: "", network: "Cigna_PPO" });
+  const [editingOption, setEditingOption] = useState<Record<string, string>>(
+    {},
+  );
+  const [newMapping, setNewMapping] = useState({
+    zip: "",
+    network: "Cigna_PPO",
+  });
   const [editingMapping, setEditingMapping] = useState<
     Record<string, { zip: string; network: string }>
   >({});
   const [error, setError] = useState<string | null>(null);
   const [statusMessage, setStatusMessage] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
-  const [networkConfigTab, setNetworkConfigTab] = useState<"assignment" | "options" | "mappings">(
-    "assignment"
-  );
+  const [networkConfigTab, setNetworkConfigTab] = useState<
+    "assignment" | "options" | "mappings"
+  >("assignment");
   const [optionPage, setOptionPage] = useState(1);
   const [mappingPage, setMappingPage] = useState(1);
-  const statusMessageFading = useAutoDismissMessage(statusMessage, setStatusMessage, 5000, 500);
+  const statusMessageFading = useAutoDismissMessage(
+    statusMessage,
+    setStatusMessage,
+    5000,
+    500,
+  );
 
   const loadAll = () => {
     Promise.all([
@@ -209,7 +223,10 @@ export default function Configuration() {
 
   useEffect(() => {
     if (typeof window === "undefined") return;
-    window.localStorage.setItem(HUBSPOT_PANEL_STORAGE_KEY, JSON.stringify(hubspotPanelState));
+    window.localStorage.setItem(
+      HUBSPOT_PANEL_STORAGE_KEY,
+      JSON.stringify(hubspotPanelState),
+    );
   }, [hubspotPanelState]);
 
   useEffect(() => {
@@ -282,7 +299,9 @@ export default function Configuration() {
   };
 
   const handleDeleteOption = async (name: string) => {
-    const confirmed = window.confirm(`Delete network option "${formatNetworkLabel(name)}"?`);
+    const confirmed = window.confirm(
+      `Delete network option "${formatNetworkLabel(name)}"?`,
+    );
     if (!confirmed) return;
     setBusy(true);
     setError(null);
@@ -304,7 +323,10 @@ export default function Configuration() {
     try {
       const next = await createNetworkMapping(newMapping);
       setNetworkMappings(next);
-      setNewMapping({ zip: "", network: settings.default_network || "Cigna_PPO" });
+      setNewMapping({
+        zip: "",
+        network: settings.default_network || "Cigna_PPO",
+      });
       setStatusMessage("ZIP mapping added.");
     } catch (err: any) {
       setError(err.message);
@@ -367,7 +389,7 @@ export default function Configuration() {
 
   const handleCleanupUnassigned = async () => {
     const confirmed = window.confirm(
-      "Delete all quotes and tasks that are not assigned to a valid user? This cannot be undone."
+      "Delete all quotes and tasks that are not assigned to a valid user? This cannot be undone.",
     );
     if (!confirmed) return;
     setBusy(true);
@@ -375,7 +397,7 @@ export default function Configuration() {
     try {
       const result = await cleanupUnassignedRecords();
       setStatusMessage(
-        `Cleanup complete. Deleted ${result.deleted_quote_count} quotes and ${result.deleted_task_count} tasks.`
+        `Cleanup complete. Deleted ${result.deleted_quote_count} quotes and ${result.deleted_task_count} tasks.`,
       );
     } catch (err: any) {
       setError(err.message);
@@ -398,8 +420,11 @@ export default function Configuration() {
         property_mappings: hubspotSettings.property_mappings,
         quote_status_to_stage: hubspotSettings.quote_status_to_stage,
         stage_to_quote_status: hubspotSettings.stage_to_quote_status,
-        oauth_redirect_uri: (hubspotSettings.oauth_redirect_uri || "").trim() || undefined,
-        private_app_token: hubspotTokenInput.trim() ? hubspotTokenInput.trim() : undefined,
+        oauth_redirect_uri:
+          (hubspotSettings.oauth_redirect_uri || "").trim() || undefined,
+        private_app_token: hubspotTokenInput.trim()
+          ? hubspotTokenInput.trim()
+          : undefined,
       });
       setHubspotSettings(next);
       setHubspotTokenInput("");
@@ -422,7 +447,7 @@ export default function Configuration() {
       const popup = window.open(
         result.authorize_url,
         "hubspot_oauth",
-        "width=640,height=780,noopener,noreferrer"
+        "width=640,height=780,noopener,noreferrer",
       );
       if (!popup) {
         throw new Error("Popup blocked. Please allow popups and try again.");
@@ -437,7 +462,9 @@ export default function Configuration() {
   };
 
   const handleDisconnectHubSpot = async () => {
-    const confirmed = window.confirm("Disconnect HubSpot OAuth for this portal?");
+    const confirmed = window.confirm(
+      "Disconnect HubSpot OAuth for this portal?",
+    );
     if (!confirmed) return;
     setBusy(true);
     setError(null);
@@ -457,7 +484,9 @@ export default function Configuration() {
     setError(null);
     try {
       const result = await testHubSpotConnection();
-      setHubspotTestMessage(`Connection successful. Pipelines found: ${result.pipelines_found}.`);
+      setHubspotTestMessage(
+        `Connection successful. Pipelines found: ${result.pipelines_found}.`,
+      );
       setStatusMessage("HubSpot connection test passed.");
     } catch (err: any) {
       setError(err.message);
@@ -487,7 +516,9 @@ export default function Configuration() {
     try {
       const properties = await getHubSpotTicketProperties();
       setHubspotTicketProperties(properties);
-      setStatusMessage(`Loaded ${properties.length} HubSpot ticket properties.`);
+      setStatusMessage(
+        `Loaded ${properties.length} HubSpot ticket properties.`,
+      );
     } catch (err: any) {
       setError(err.message);
     } finally {
@@ -499,13 +530,16 @@ export default function Configuration() {
     (panel: HubspotPanelKey) => (event: SyntheticEvent<HTMLDetailsElement>) => {
       const isOpen = event.currentTarget.open;
       setHubspotPanelState((prev) =>
-        prev[panel] === isOpen ? prev : { ...prev, [panel]: isOpen }
+        prev[panel] === isOpen ? prev : { ...prev, [panel]: isOpen },
       );
     };
 
   const selectedPipeline = useMemo(
-    () => hubspotPipelines.find((pipeline) => pipeline.id === hubspotSettings.pipeline_id) || null,
-    [hubspotPipelines, hubspotSettings.pipeline_id]
+    () =>
+      hubspotPipelines.find(
+        (pipeline) => pipeline.id === hubspotSettings.pipeline_id,
+      ) || null,
+    [hubspotPipelines, hubspotSettings.pipeline_id],
   );
 
   const stageOptions = useMemo(() => {
@@ -513,7 +547,7 @@ export default function Configuration() {
       pipeline.stages.map((stage) => ({
         id: stage.id,
         label: `${stage.label} (${stage.id})`,
-      }))
+      })),
     );
     const byId: Record<string, string> = {};
     for (const stage of fromPipelines) byId[stage.id] = stage.label;
@@ -527,19 +561,24 @@ export default function Configuration() {
     return Object.entries(byId)
       .map(([id, label]) => ({ id, label }))
       .sort((a, b) => a.label.localeCompare(b.label));
-  }, [hubspotPipelines, hubspotSettings.quote_status_to_stage, hubspotSettings.stage_to_quote_status]);
+  }, [
+    hubspotPipelines,
+    hubspotSettings.quote_status_to_stage,
+    hubspotSettings.stage_to_quote_status,
+  ]);
 
   const quoteStatusRows = useMemo(() => {
     const extra = Object.keys(hubspotSettings.quote_status_to_stage).filter(
-      (status) => !QUOTE_STATUS_OPTIONS.includes(status)
+      (status) => !QUOTE_STATUS_OPTIONS.includes(status),
     );
     return [...QUOTE_STATUS_OPTIONS, ...extra];
   }, [hubspotSettings.quote_status_to_stage]);
 
   const stageToStatusRows = useMemo(() => {
-    const fromSelectedPipeline = selectedPipeline?.stages.map((stage) => stage.id) || [];
+    const fromSelectedPipeline =
+      selectedPipeline?.stages.map((stage) => stage.id) || [];
     const extra = Object.keys(hubspotSettings.stage_to_quote_status).filter(
-      (stageId) => !fromSelectedPipeline.includes(stageId)
+      (stageId) => !fromSelectedPipeline.includes(stageId),
     );
     return [...fromSelectedPipeline, ...extra];
   }, [selectedPipeline, hubspotSettings.stage_to_quote_status]);
@@ -547,7 +586,7 @@ export default function Configuration() {
   const propertyMappingRows = useMemo(() => {
     const knownKeys = HUBSPOT_LOCAL_FIELD_OPTIONS.map((item) => item.key);
     const extra = Object.keys(hubspotSettings.property_mappings).filter(
-      (key) => !knownKeys.includes(key)
+      (key) => !knownKeys.includes(key),
     );
     return [...knownKeys, ...extra];
   }, [hubspotSettings.property_mappings]);
@@ -566,22 +605,27 @@ export default function Configuration() {
   }, [hubspotTicketProperties, hubspotSettings.property_mappings]);
 
   const propertyLabelByName = useMemo(
-    () => Object.fromEntries(propertyOptions.map((property) => [property.name, property.label])),
-    [propertyOptions]
+    () =>
+      Object.fromEntries(
+        propertyOptions.map((property) => [property.name, property.label]),
+      ),
+    [propertyOptions],
   );
 
   const localFieldLabelByKey = useMemo(
     () =>
-      Object.fromEntries(HUBSPOT_LOCAL_FIELD_OPTIONS.map((item) => [item.key, item.label])),
-    []
+      Object.fromEntries(
+        HUBSPOT_LOCAL_FIELD_OPTIONS.map((item) => [item.key, item.label]),
+      ),
+    [],
   );
 
   const stageLabelById = useMemo(
     () =>
       Object.fromEntries(
-        stageOptions.map((stage) => [stage.id, stage.label])
+        stageOptions.map((stage) => [stage.id, stage.label]),
       ) as Record<string, string>,
-    [stageOptions]
+    [stageOptions],
   );
 
   const setPropertyMapping = (localField: string, propertyName: string) => {
@@ -599,9 +643,13 @@ export default function Configuration() {
   const filteredPropertyMappingRows = useMemo(() => {
     const query = fieldMappingQuery.trim().toLowerCase();
     return propertyMappingRows.filter((localField) => {
-      const label = (localFieldLabelByKey[localField] || localField).toLowerCase();
+      const label = (
+        localFieldLabelByKey[localField] || localField
+      ).toLowerCase();
       const matchesQuery =
-        !query || localField.toLowerCase().includes(query) || label.includes(query);
+        !query ||
+        localField.toLowerCase().includes(query) ||
+        label.includes(query);
       const hasMapping = Boolean(hubspotSettings.property_mappings[localField]);
       return matchesQuery && (!showMappedFieldsOnly || hasMapping);
     });
@@ -614,18 +662,27 @@ export default function Configuration() {
   ]);
 
   const mappedFieldCount = useMemo(
-    () => Object.values(hubspotSettings.property_mappings).filter((value) => Boolean(value)).length,
-    [hubspotSettings.property_mappings]
+    () =>
+      Object.values(hubspotSettings.property_mappings).filter((value) =>
+        Boolean(value),
+      ).length,
+    [hubspotSettings.property_mappings],
   );
 
   const quoteStatusMappedCount = useMemo(
-    () => Object.values(hubspotSettings.quote_status_to_stage).filter((value) => Boolean(value)).length,
-    [hubspotSettings.quote_status_to_stage]
+    () =>
+      Object.values(hubspotSettings.quote_status_to_stage).filter((value) =>
+        Boolean(value),
+      ).length,
+    [hubspotSettings.quote_status_to_stage],
   );
 
   const stageStatusMappedCount = useMemo(
-    () => Object.values(hubspotSettings.stage_to_quote_status).filter((value) => Boolean(value)).length,
-    [hubspotSettings.stage_to_quote_status]
+    () =>
+      Object.values(hubspotSettings.stage_to_quote_status).filter((value) =>
+        Boolean(value),
+      ).length,
+    [hubspotSettings.stage_to_quote_status],
   );
 
   const setQuoteStatusStageMapping = (quoteStatus: string, stageId: string) => {
@@ -654,11 +711,11 @@ export default function Configuration() {
 
   const optionPagination = useMemo(
     () => paginateItems(networkOptions, optionPage, TABLE_PAGE_SIZE),
-    [networkOptions, optionPage]
+    [networkOptions, optionPage],
   );
   const mappingPagination = useMemo(
     () => paginateItems(networkMappings, mappingPage, TABLE_PAGE_SIZE),
-    [networkMappings, mappingPage]
+    [networkMappings, mappingPage],
   );
 
   useEffect(() => {
@@ -681,7 +738,9 @@ export default function Configuration() {
       </div>
       {error && <div className="notice">{error}</div>}
       {statusMessage && (
-        <div className={`notice notice-success ${statusMessageFading ? "fade-out" : ""}`}>
+        <div
+          className={`notice notice-success ${statusMessageFading ? "fade-out" : ""}`}
+        >
           {statusMessage}
         </div>
       )}
@@ -689,25 +748,38 @@ export default function Configuration() {
       <section className="section" style={{ marginTop: 12 }}>
         <h3>Network Configuration</h3>
         <div className="helper" style={{ marginBottom: 12 }}>
-          Configure assignment defaults, network options, and ZIP mappings in one place.
+          Configure assignment defaults, network options, and ZIP mappings in
+          one place.
         </div>
         <div className="inline-actions" style={{ marginBottom: 12 }}>
           <button
-            className={networkConfigTab === "assignment" ? "button secondary" : "button ghost"}
+            className={
+              networkConfigTab === "assignment"
+                ? "button secondary"
+                : "button ghost"
+            }
             type="button"
             onClick={() => setNetworkConfigTab("assignment")}
           >
             Assignment Settings
           </button>
           <button
-            className={networkConfigTab === "options" ? "button secondary" : "button ghost"}
+            className={
+              networkConfigTab === "options"
+                ? "button secondary"
+                : "button ghost"
+            }
             type="button"
             onClick={() => setNetworkConfigTab("options")}
           >
             Network Options
           </button>
           <button
-            className={networkConfigTab === "mappings" ? "button secondary" : "button ghost"}
+            className={
+              networkConfigTab === "mappings"
+                ? "button secondary"
+                : "button ghost"
+            }
             type="button"
             onClick={() => setNetworkConfigTab("mappings")}
           >
@@ -722,7 +794,10 @@ export default function Configuration() {
               <select
                 value={settings.default_network}
                 onChange={(e) =>
-                  setSettings((prev) => ({ ...prev, default_network: e.target.value }))
+                  setSettings((prev) => ({
+                    ...prev,
+                    default_network: e.target.value,
+                  }))
                 }
               >
                 {networkOptions.map((option) => (
@@ -744,7 +819,7 @@ export default function Configuration() {
                     ...prev,
                     coverage_threshold: Math.max(
                       0,
-                      Math.min(1, Number(e.target.value || 0) / 100)
+                      Math.min(1, Number(e.target.value || 0) / 100),
                     ),
                   }))
                 }
@@ -772,85 +847,106 @@ export default function Configuration() {
                   placeholder="Example_Network"
                 />
               </label>
-              <button className="button secondary" type="button" onClick={handleAddOption} disabled={busy}>
+              <button
+                className="button secondary"
+                type="button"
+                onClick={handleAddOption}
+                disabled={busy}
+              >
                 Add Option
               </button>
             </div>
-            <table className="table">
-              <thead>
-                <tr>
-                  <th>Value</th>
-                  <th>Display</th>
-                  <th>Actions</th>
-                </tr>
-              </thead>
-              <tbody>
-                {optionPagination.pageItems.map((option) => {
-                  const isEditing = Object.prototype.hasOwnProperty.call(editingOption, option);
-                  return (
-                    <tr key={option}>
-                      <td>
-                        {isEditing ? (
-                          <input
-                            value={editingOption[option]}
-                            onChange={(e) =>
-                              setEditingOption((prev) => ({ ...prev, [option]: e.target.value }))
-                            }
-                          />
-                        ) : (
-                          option
-                        )}
-                      </td>
-                      <td>{formatNetworkLabel(option)}</td>
-                      <td>
-                        <div className="inline-actions">
+            <div className="table-scroll">
+              <table className="table">
+                <thead>
+                  <tr>
+                    <th>Value</th>
+                    <th>Display</th>
+                    <th>Actions</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {optionPagination.pageItems.map((option) => {
+                    const isEditing = Object.prototype.hasOwnProperty.call(
+                      editingOption,
+                      option,
+                    );
+                    return (
+                      <tr key={option}>
+                        <td>
                           {isEditing ? (
-                            <>
-                              <button className="button secondary" type="button" onClick={() => handleSaveOption(option)} disabled={busy}>
-                                Save
-                              </button>
-                              <button
-                                className="button ghost"
-                                type="button"
-                                onClick={() =>
-                                  setEditingOption((prev) => {
-                                    const copy = { ...prev };
-                                    delete copy[option];
-                                    return copy;
-                                  })
-                                }
-                              >
-                                Cancel
-                              </button>
-                            </>
+                            <input
+                              value={editingOption[option]}
+                              onChange={(e) =>
+                                setEditingOption((prev) => ({
+                                  ...prev,
+                                  [option]: e.target.value,
+                                }))
+                              }
+                            />
                           ) : (
-                            <>
-                              <button
-                                className="button ghost"
-                                type="button"
-                                onClick={() =>
-                                  setEditingOption((prev) => ({ ...prev, [option]: option }))
-                                }
-                              >
-                                Edit
-                              </button>
-                              <button
-                                className="button"
-                                type="button"
-                                onClick={() => handleDeleteOption(option)}
-                                disabled={busy || option === "Cigna_PPO"}
-                              >
-                                Delete
-                              </button>
-                            </>
+                            option
                           )}
-                        </div>
-                      </td>
-                    </tr>
-                  );
-                })}
-              </tbody>
-            </table>
+                        </td>
+                        <td>{formatNetworkLabel(option)}</td>
+                        <td>
+                          <div className="inline-actions">
+                            {isEditing ? (
+                              <>
+                                <button
+                                  className="button secondary"
+                                  type="button"
+                                  onClick={() => handleSaveOption(option)}
+                                  disabled={busy}
+                                >
+                                  Save
+                                </button>
+                                <button
+                                  className="button ghost"
+                                  type="button"
+                                  onClick={() =>
+                                    setEditingOption((prev) => {
+                                      const copy = { ...prev };
+                                      delete copy[option];
+                                      return copy;
+                                    })
+                                  }
+                                >
+                                  Cancel
+                                </button>
+                              </>
+                            ) : (
+                              <>
+                                <button
+                                  className="button ghost"
+                                  type="button"
+                                  onClick={() =>
+                                    setEditingOption((prev) => ({
+                                      ...prev,
+                                      [option]: option,
+                                    }))
+                                  }
+                                >
+                                  Edit
+                                </button>
+                                <button
+                                  className="button"
+                                  type="button"
+                                  onClick={() => handleDeleteOption(option)}
+                                  disabled={busy || option === "Cigna_PPO"}
+                                >
+                                  Delete
+                                </button>
+                              </>
+                            )}
+                          </div>
+                        </td>
+                      </tr>
+                    );
+                  })}
+                </tbody>
+              </table>
+            </div>
             <TablePagination
               page={optionPagination.currentPage}
               totalItems={networkOptions.length}
@@ -867,7 +963,9 @@ export default function Configuration() {
                 ZIP
                 <input
                   value={newMapping.zip}
-                  onChange={(e) => setNewMapping((prev) => ({ ...prev, zip: e.target.value }))}
+                  onChange={(e) =>
+                    setNewMapping((prev) => ({ ...prev, zip: e.target.value }))
+                  }
                   placeholder="63011"
                 />
               </label>
@@ -875,7 +973,12 @@ export default function Configuration() {
                 Network
                 <select
                   value={newMapping.network}
-                  onChange={(e) => setNewMapping((prev) => ({ ...prev, network: e.target.value }))}
+                  onChange={(e) =>
+                    setNewMapping((prev) => ({
+                      ...prev,
+                      network: e.target.value,
+                    }))
+                  }
                 >
                   {networkOptions.map((option) => (
                     <option key={option} value={option}>
@@ -884,112 +987,135 @@ export default function Configuration() {
                   ))}
                 </select>
               </label>
-              <button className="button secondary" type="button" onClick={handleAddMapping} disabled={busy}>
+              <button
+                className="button secondary"
+                type="button"
+                onClick={handleAddMapping}
+                disabled={busy}
+              >
                 Add Mapping
               </button>
             </div>
 
-            <table className="table">
-              <thead>
-                <tr>
-                  <th>ZIP</th>
-                  <th>Network</th>
-                  <th>Actions</th>
-                </tr>
-              </thead>
-              <tbody>
-                {mappingPagination.pageItems.map((row) => {
-                  const isEditing = Boolean(editingMapping[row.zip]);
-                  const draft = editingMapping[row.zip] || row;
-                  return (
-                    <tr key={row.zip}>
-                      <td>
-                        {isEditing ? (
-                          <input
-                            value={draft.zip}
-                            onChange={(e) =>
-                              setEditingMapping((prev) => ({
-                                ...prev,
-                                [row.zip]: { ...draft, zip: e.target.value },
-                              }))
-                            }
-                          />
-                        ) : (
-                          row.zip
-                        )}
-                      </td>
-                      <td>
-                        {isEditing ? (
-                          <select
-                            value={draft.network}
-                            onChange={(e) =>
-                              setEditingMapping((prev) => ({
-                                ...prev,
-                                [row.zip]: { ...draft, network: e.target.value },
-                              }))
-                            }
-                          >
-                            {networkOptions.map((option) => (
-                              <option key={option} value={option}>
-                                {formatNetworkLabel(option)}
-                              </option>
-                            ))}
-                          </select>
-                        ) : (
-                          formatNetworkLabel(row.network)
-                        )}
-                      </td>
-                      <td>
-                        <div className="inline-actions">
+            <div className="table-scroll">
+              <table className="table">
+                <thead>
+                  <tr>
+                    <th>ZIP</th>
+                    <th>Network</th>
+                    <th>Actions</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {mappingPagination.pageItems.map((row) => {
+                    const isEditing = Boolean(editingMapping[row.zip]);
+                    const draft = editingMapping[row.zip] || row;
+                    return (
+                      <tr key={row.zip}>
+                        <td>
                           {isEditing ? (
-                            <>
-                              <button className="button secondary" type="button" onClick={() => handleSaveMapping(row.zip)} disabled={busy}>
-                                Save
-                              </button>
-                              <button
-                                className="button ghost"
-                                type="button"
-                                onClick={() =>
-                                  setEditingMapping((prev) => {
-                                    const copy = { ...prev };
-                                    delete copy[row.zip];
-                                    return copy;
-                                  })
-                                }
-                              >
-                                Cancel
-                              </button>
-                            </>
+                            <input
+                              value={draft.zip}
+                              onChange={(e) =>
+                                setEditingMapping((prev) => ({
+                                  ...prev,
+                                  [row.zip]: { ...draft, zip: e.target.value },
+                                }))
+                              }
+                            />
                           ) : (
-                            <>
-                              <button
-                                className="button ghost"
-                                type="button"
-                                onClick={() =>
-                                  setEditingMapping((prev) => ({ ...prev, [row.zip]: { ...row } }))
-                                }
-                              >
-                                Edit
-                              </button>
-                              <button className="button" type="button" onClick={() => handleDeleteMapping(row.zip)} disabled={busy}>
-                                Delete
-                              </button>
-                            </>
+                            row.zip
                           )}
-                        </div>
+                        </td>
+                        <td>
+                          {isEditing ? (
+                            <select
+                              value={draft.network}
+                              onChange={(e) =>
+                                setEditingMapping((prev) => ({
+                                  ...prev,
+                                  [row.zip]: {
+                                    ...draft,
+                                    network: e.target.value,
+                                  },
+                                }))
+                              }
+                            >
+                              {networkOptions.map((option) => (
+                                <option key={option} value={option}>
+                                  {formatNetworkLabel(option)}
+                                </option>
+                              ))}
+                            </select>
+                          ) : (
+                            formatNetworkLabel(row.network)
+                          )}
+                        </td>
+                        <td>
+                          <div className="inline-actions">
+                            {isEditing ? (
+                              <>
+                                <button
+                                  className="button secondary"
+                                  type="button"
+                                  onClick={() => handleSaveMapping(row.zip)}
+                                  disabled={busy}
+                                >
+                                  Save
+                                </button>
+                                <button
+                                  className="button ghost"
+                                  type="button"
+                                  onClick={() =>
+                                    setEditingMapping((prev) => {
+                                      const copy = { ...prev };
+                                      delete copy[row.zip];
+                                      return copy;
+                                    })
+                                  }
+                                >
+                                  Cancel
+                                </button>
+                              </>
+                            ) : (
+                              <>
+                                <button
+                                  className="button ghost"
+                                  type="button"
+                                  onClick={() =>
+                                    setEditingMapping((prev) => ({
+                                      ...prev,
+                                      [row.zip]: { ...row },
+                                    }))
+                                  }
+                                >
+                                  Edit
+                                </button>
+                                <button
+                                  className="button"
+                                  type="button"
+                                  onClick={() => handleDeleteMapping(row.zip)}
+                                  disabled={busy}
+                                >
+                                  Delete
+                                </button>
+                              </>
+                            )}
+                          </div>
+                        </td>
+                      </tr>
+                    );
+                  })}
+                  {networkMappings.length === 0 && (
+                    <tr>
+                      <td colSpan={3} className="helper">
+                        No ZIP mappings configured yet.
                       </td>
                     </tr>
-                  );
-                })}
-                {networkMappings.length === 0 && (
-                  <tr>
-                    <td colSpan={3} className="helper">
-                      No ZIP mappings configured yet.
-                    </td>
-                  </tr>
-                )}
-              </tbody>
-            </table>
+                  )}
+                </tbody>
+              </table>
+            </div>
             <TablePagination
               page={mappingPagination.currentPage}
               totalItems={networkMappings.length}
@@ -1003,8 +1129,9 @@ export default function Configuration() {
       <section className="section" style={{ marginTop: 12 }}>
         <h3>HubSpot Integration (Admin)</h3>
         <div className="helper" style={{ marginBottom: 12 }}>
-          MVP flow: a new quote creates a HubSpot ticket. Use popup sign-in (OAuth) or a private
-          app token, then configure pipeline/stage and mapping rules.
+          MVP flow: a new quote creates a HubSpot ticket. Use popup sign-in
+          (OAuth) or a private app token, then configure pipeline/stage and
+          mapping rules.
         </div>
         <div className="notice" style={{ marginBottom: 12 }}>
           OAuth Status:{" "}
@@ -1032,7 +1159,13 @@ export default function Configuration() {
           >
             <div className="inline-actions">
               <label style={{ minWidth: 220 }}>
-                <span style={{ display: "inline-flex", alignItems: "center", gap: 8 }}>
+                <span
+                  style={{
+                    display: "inline-flex",
+                    alignItems: "center",
+                    gap: 8,
+                  }}
+                >
                   <input
                     type="checkbox"
                     checked={hubspotSettings.enabled}
@@ -1051,7 +1184,10 @@ export default function Configuration() {
                 <input
                   value={hubspotSettings.portal_id}
                   onChange={(e) =>
-                    setHubspotSettings((prev) => ({ ...prev, portal_id: e.target.value }))
+                    setHubspotSettings((prev) => ({
+                      ...prev,
+                      portal_id: e.target.value,
+                    }))
                   }
                   placeholder="7106327"
                 />
@@ -1062,7 +1198,11 @@ export default function Configuration() {
                   type="password"
                   value={hubspotTokenInput}
                   onChange={(e) => setHubspotTokenInput(e.target.value)}
-                  placeholder={hubspotSettings.token_configured ? "Token saved (enter to replace)" : "pat-..."}
+                  placeholder={
+                    hubspotSettings.token_configured
+                      ? "Token saved (enter to replace)"
+                      : "pat-..."
+                  }
                 />
               </label>
             </div>
@@ -1105,7 +1245,10 @@ export default function Configuration() {
                 <input
                   value={hubspotSettings.pipeline_id}
                   onChange={(e) =>
-                    setHubspotSettings((prev) => ({ ...prev, pipeline_id: e.target.value }))
+                    setHubspotSettings((prev) => ({
+                      ...prev,
+                      pipeline_id: e.target.value,
+                    }))
                   }
                   placeholder="98238573"
                 />
@@ -1126,7 +1269,13 @@ export default function Configuration() {
             </div>
             <div className="inline-actions" style={{ marginTop: 8 }}>
               <label style={{ minWidth: 220 }}>
-                <span style={{ display: "inline-flex", alignItems: "center", gap: 8 }}>
+                <span
+                  style={{
+                    display: "inline-flex",
+                    alignItems: "center",
+                    gap: 8,
+                  }}
+                >
                   <input
                     type="checkbox"
                     checked={hubspotSettings.sync_quote_to_hubspot}
@@ -1141,7 +1290,13 @@ export default function Configuration() {
                 </span>
               </label>
               <label style={{ minWidth: 220 }}>
-                <span style={{ display: "inline-flex", alignItems: "center", gap: 8 }}>
+                <span
+                  style={{
+                    display: "inline-flex",
+                    alignItems: "center",
+                    gap: 8,
+                  }}
+                >
                   <input
                     type="checkbox"
                     checked={hubspotSettings.sync_hubspot_to_quote}
@@ -1201,28 +1356,46 @@ export default function Configuration() {
               </div>
 
               <div className="hubspot-mapping-stats">
-                <span className="badge primary">Field Mappings: {mappedFieldCount}</span>
-                <span className="badge">Status -&gt; Stage: {quoteStatusMappedCount}</span>
-                <span className="badge">Stage -&gt; Status: {stageStatusMappedCount}</span>
+                <span className="badge primary">
+                  Field Mappings: {mappedFieldCount}
+                </span>
+                <span className="badge">
+                  Status -&gt; Stage: {quoteStatusMappedCount}
+                </span>
+                <span className="badge">
+                  Stage -&gt; Status: {stageStatusMappedCount}
+                </span>
               </div>
 
               <div className="inline-actions" style={{ marginBottom: 10 }}>
                 <button
-                  className={hubspotMappingTab === "fields" ? "button secondary" : "button ghost"}
+                  className={
+                    hubspotMappingTab === "fields"
+                      ? "button secondary"
+                      : "button ghost"
+                  }
                   type="button"
                   onClick={() => setHubspotMappingTab("fields")}
                 >
                   Field Mapping
                 </button>
                 <button
-                  className={hubspotMappingTab === "quote_to_stage" ? "button secondary" : "button ghost"}
+                  className={
+                    hubspotMappingTab === "quote_to_stage"
+                      ? "button secondary"
+                      : "button ghost"
+                  }
                   type="button"
                   onClick={() => setHubspotMappingTab("quote_to_stage")}
                 >
                   Quote Status -&gt; Stage
                 </button>
                 <button
-                  className={hubspotMappingTab === "stage_to_quote" ? "button secondary" : "button ghost"}
+                  className={
+                    hubspotMappingTab === "stage_to_quote"
+                      ? "button secondary"
+                      : "button ghost"
+                  }
                   type="button"
                   onClick={() => setHubspotMappingTab("stage_to_quote")}
                 >
@@ -1246,51 +1419,73 @@ export default function Configuration() {
                       />
                     </label>
                     <label style={{ minWidth: 220 }}>
-                      <span style={{ display: "inline-flex", alignItems: "center", gap: 8 }}>
+                      <span
+                        style={{
+                          display: "inline-flex",
+                          alignItems: "center",
+                          gap: 8,
+                        }}
+                      >
                         <input
                           type="checkbox"
                           checked={showMappedFieldsOnly}
-                          onChange={(e) => setShowMappedFieldsOnly(e.target.checked)}
+                          onChange={(e) =>
+                            setShowMappedFieldsOnly(e.target.checked)
+                          }
                         />
                         Show mapped fields only
                       </span>
                     </label>
                   </div>
-                  <table className="table slim">
-                    <thead>
-                      <tr>
-                        <th>Portal Field</th>
-                        <th>HubSpot Ticket Property</th>
-                      </tr>
-                    </thead>
-                    <tbody>
-                      {filteredPropertyMappingRows.map((localField) => (
-                        <tr key={localField}>
-                          <td>{localFieldLabelByKey[localField] || localField}</td>
-                          <td>
-                            <select
-                              value={hubspotSettings.property_mappings[localField] || ""}
-                              onChange={(e) => setPropertyMapping(localField, e.target.value)}
-                            >
-                              <option value="">Not mapped</option>
-                              {propertyOptions.map((property) => (
-                                <option key={property.name} value={property.name}>
-                                  {propertyLabelByName[property.name] || property.name}
-                                </option>
-                              ))}
-                            </select>
-                          </td>
-                        </tr>
-                      ))}
-                      {filteredPropertyMappingRows.length === 0 && (
+                  <div className="table-scroll">
+                    <table className="table slim">
+                      <thead>
                         <tr>
-                          <td colSpan={2} className="helper">
-                            No fields match the current filter.
-                          </td>
+                          <th>Portal Field</th>
+                          <th>HubSpot Ticket Property</th>
                         </tr>
-                      )}
-                    </tbody>
-                  </table>
+                      </thead>
+                      <tbody>
+                        {filteredPropertyMappingRows.map((localField) => (
+                          <tr key={localField}>
+                            <td>
+                              {localFieldLabelByKey[localField] || localField}
+                            </td>
+                            <td>
+                              <select
+                                value={
+                                  hubspotSettings.property_mappings[
+                                    localField
+                                  ] || ""
+                                }
+                                onChange={(e) =>
+                                  setPropertyMapping(localField, e.target.value)
+                                }
+                              >
+                                <option value="">Not mapped</option>
+                                {propertyOptions.map((property) => (
+                                  <option
+                                    key={property.name}
+                                    value={property.name}
+                                  >
+                                    {propertyLabelByName[property.name] ||
+                                      property.name}
+                                  </option>
+                                ))}
+                              </select>
+                            </td>
+                          </tr>
+                        ))}
+                        {filteredPropertyMappingRows.length === 0 && (
+                          <tr>
+                            <td colSpan={2} className="helper">
+                              No fields match the current filter.
+                            </td>
+                          </tr>
+                        )}
+                      </tbody>
+                    </table>
+                  </div>
                 </>
               )}
 
@@ -1299,77 +1494,100 @@ export default function Configuration() {
                   <div className="helper" style={{ marginBottom: 8 }}>
                     Choose which HubSpot stage each quote status should sync to.
                   </div>
-                  <table className="table slim">
-                    <thead>
-                      <tr>
-                        <th>Quote Status</th>
-                        <th>HubSpot Stage</th>
-                      </tr>
-                    </thead>
-                    <tbody>
-                      {quoteStatusRows.map((status) => (
-                        <tr key={status}>
-                          <td>{status}</td>
-                          <td>
-                            <select
-                              value={hubspotSettings.quote_status_to_stage[status] || ""}
-                              onChange={(e) => setQuoteStatusStageMapping(status, e.target.value)}
-                            >
-                              <option value="">Not mapped</option>
-                              {stageOptions.map((stage) => (
-                                <option key={stage.id} value={stage.id}>
-                                  {stage.label}
-                                </option>
-                              ))}
-                            </select>
-                          </td>
+                  <div className="table-scroll">
+                    <table className="table slim">
+                      <thead>
+                        <tr>
+                          <th>Quote Status</th>
+                          <th>HubSpot Stage</th>
                         </tr>
-                      ))}
-                    </tbody>
-                  </table>
+                      </thead>
+                      <tbody>
+                        {quoteStatusRows.map((status) => (
+                          <tr key={status}>
+                            <td>{status}</td>
+                            <td>
+                              <select
+                                value={
+                                  hubspotSettings.quote_status_to_stage[
+                                    status
+                                  ] || ""
+                                }
+                                onChange={(e) =>
+                                  setQuoteStatusStageMapping(
+                                    status,
+                                    e.target.value,
+                                  )
+                                }
+                              >
+                                <option value="">Not mapped</option>
+                                {stageOptions.map((stage) => (
+                                  <option key={stage.id} value={stage.id}>
+                                    {stage.label}
+                                  </option>
+                                ))}
+                              </select>
+                            </td>
+                          </tr>
+                        ))}
+                      </tbody>
+                    </table>
+                  </div>
                 </>
               )}
 
               {hubspotMappingTab === "stage_to_quote" && (
                 <>
                   <div className="helper" style={{ marginBottom: 8 }}>
-                    Choose which quote status should be applied for each HubSpot stage.
+                    Choose which quote status should be applied for each HubSpot
+                    stage.
                   </div>
-                  <table className="table slim">
-                    <thead>
-                      <tr>
-                        <th>HubSpot Stage</th>
-                        <th>Quote Status</th>
-                      </tr>
-                    </thead>
-                    <tbody>
-                      {stageToStatusRows.map((stageId) => (
-                        <tr key={stageId}>
-                          <td>{stageLabelById[stageId] || stageId}</td>
-                          <td>
-                            <select
-                              value={hubspotSettings.stage_to_quote_status[stageId] || ""}
-                              onChange={(e) => setStageQuoteStatusMapping(stageId, e.target.value)}
-                            >
-                              <option value="">Not mapped</option>
-                              {quoteStatusRows.map((status) => (
-                                <option key={status} value={status}>
-                                  {status}
-                                </option>
-                              ))}
-                            </select>
-                          </td>
-                        </tr>
-                      ))}
-                      {stageToStatusRows.length === 0 && (
+                  <div className="table-scroll">
+                    <table className="table slim">
+                      <thead>
                         <tr>
-                          <td colSpan={2} className="helper">
-                            Load pipelines to map stages.
-                          </td>
+                          <th>HubSpot Stage</th>
+                          <th>Quote Status</th>
                         </tr>
-                      )}
-                    </tbody>
-                  </table>
+                      </thead>
+                      <tbody>
+                        {stageToStatusRows.map((stageId) => (
+                          <tr key={stageId}>
+                            <td>{stageLabelById[stageId] || stageId}</td>
+                            <td>
+                              <select
+                                value={
+                                  hubspotSettings.stage_to_quote_status[
+                                    stageId
+                                  ] || ""
+                                }
+                                onChange={(e) =>
+                                  setStageQuoteStatusMapping(
+                                    stageId,
+                                    e.target.value,
+                                  )
+                                }
+                              >
+                                <option value="">Not mapped</option>
+                                {quoteStatusRows.map((status) => (
+                                  <option key={status} value={status}>
+                                    {status}
+                                  </option>
+                                ))}
+                              </select>
+                            </td>
+                          </tr>
+                        ))}
+                        {stageToStatusRows.length === 0 && (
+                          <tr>
+                            <td colSpan={2} className="helper">
+                              Load pipelines to map stages.
+                            </td>
+                          </tr>
+                        )}
+                      </tbody>
+                    </table>
+                  </div>
                 </>
               )}
             </div>
@@ -1403,7 +1621,10 @@ export default function Configuration() {
                         <div>
                           <strong>{pipeline.label}</strong> ({pipeline.id})
                         </div>
-                        <div className="inline-actions" style={{ marginTop: 6 }}>
+                        <div
+                          className="inline-actions"
+                          style={{ marginTop: 6 }}
+                        >
                           {pipeline.stages.map((stage) => (
                             <button
                               key={stage.id}
@@ -1439,7 +1660,12 @@ export default function Configuration() {
           >
             Save HubSpot Settings
           </button>
-          <button className="button ghost" type="button" onClick={handleTestHubSpot} disabled={busy}>
+          <button
+            className="button ghost"
+            type="button"
+            onClick={handleTestHubSpot}
+            disabled={busy}
+          >
             Test Connection
           </button>
         </div>
@@ -1449,19 +1675,23 @@ export default function Configuration() {
             {hubspotTestMessage}
           </div>
         )}
-
       </section>
 
       <section className="section" style={{ marginTop: 12 }}>
         <h3>Data Cleanup</h3>
         <div className="helper" style={{ marginBottom: 12 }}>
-          Permanently removes quotes and tasks with no assigned user (or an invalid assigned user).
+          Permanently removes quotes and tasks with no assigned user (or an
+          invalid assigned user).
         </div>
-        <button className="button" type="button" onClick={handleCleanupUnassigned} disabled={busy}>
+        <button
+          className="button"
+          type="button"
+          onClick={handleCleanupUnassigned}
+          disabled={busy}
+        >
           Delete Unassigned Quotes & Tasks
         </button>
       </section>
-
     </section>
   );
 }

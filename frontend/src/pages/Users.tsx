@@ -17,9 +17,16 @@ import { useAutoDismissMessage } from "../hooks/useAutoDismissMessage";
 export default function Users() {
   const { email } = useAccess();
   const [users, setUsers] = useState<User[]>([]);
-  const [quotes, setQuotes] = useState<{ id: string; company: string; assigned_user_id?: string | null }[]>([]);
+  const [quotes, setQuotes] = useState<
+    { id: string; company: string; assigned_user_id?: string | null }[]
+  >([]);
   const [tasks, setTasks] = useState<
-    { id: string; title: string; installation_company?: string | null; assigned_user_id?: string | null }[]
+    {
+      id: string;
+      title: string;
+      installation_company?: string | null;
+      assigned_user_id?: string | null;
+    }[]
   >([]);
   const [error, setError] = useState<string | null>(null);
   const [statusMessage, setStatusMessage] = useState<string | null>(null);
@@ -52,7 +59,12 @@ export default function Users() {
   const [passwordDraft, setPasswordDraft] = useState("");
   const [passwordConfirm, setPasswordConfirm] = useState("");
   const [page, setPage] = useState(1);
-  const statusMessageFading = useAutoDismissMessage(statusMessage, setStatusMessage, 5000, 500);
+  const statusMessageFading = useAutoDismissMessage(
+    statusMessage,
+    setStatusMessage,
+    5000,
+    500,
+  );
 
   const load = () => {
     getUsers()
@@ -65,8 +77,8 @@ export default function Users() {
             id: q.id,
             company: q.company,
             assigned_user_id: q.assigned_user_id,
-          }))
-        )
+          })),
+        ),
       )
       .catch(() => setQuotes([]));
     getTasks({ role: "admin", email })
@@ -77,8 +89,8 @@ export default function Users() {
             title: task.title,
             installation_company: task.installation_company || null,
             assigned_user_id: task.assigned_user_id,
-          }))
-        )
+          })),
+        ),
       )
       .catch(() => setTasks([]));
   };
@@ -172,7 +184,9 @@ export default function Users() {
     try {
       await updateUser(passwordUser.id, { password });
       closePasswordModal();
-      setStatusMessage(`Password updated for ${passwordUser.first_name} ${passwordUser.last_name}.`);
+      setStatusMessage(
+        `Password updated for ${passwordUser.first_name} ${passwordUser.last_name}.`,
+      );
     } catch (err: any) {
       setError(err.message);
     }
@@ -217,7 +231,9 @@ export default function Users() {
   };
 
   const handleDelete = async (user: User) => {
-    const confirmed = window.confirm(`Delete ${user.first_name} ${user.last_name}?`);
+    const confirmed = window.confirm(
+      `Delete ${user.first_name} ${user.last_name}?`,
+    );
     if (!confirmed) return;
     setError(null);
     setStatusMessage(null);
@@ -239,10 +255,14 @@ export default function Users() {
     }
     setAssignUserId(user.id);
     setSelectedQuoteIds(
-      quotes.filter((quote) => quote.assigned_user_id === user.id).map((quote) => quote.id)
+      quotes
+        .filter((quote) => quote.assigned_user_id === user.id)
+        .map((quote) => quote.id),
     );
     setSelectedTaskIds(
-      tasks.filter((task) => task.assigned_user_id === user.id).map((task) => task.id)
+      tasks
+        .filter((task) => task.assigned_user_id === user.id)
+        .map((task) => task.id),
     );
   };
 
@@ -272,36 +292,60 @@ export default function Users() {
 
   return (
     <section className="section">
-      <div className="inline-actions" style={{ justifyContent: "space-between", marginBottom: 8 }}>
+      <div
+        className="inline-actions"
+        style={{ justifyContent: "space-between", marginBottom: 8 }}
+      >
         <h2 style={{ margin: 0 }}>Users</h2>
-        <button className="button" type="button" onClick={() => setCreateModalOpen(true)}>
+        <button
+          className="button"
+          type="button"
+          onClick={() => setCreateModalOpen(true)}
+        >
           Create User
         </button>
       </div>
       {error && <div className="notice">{error}</div>}
       {statusMessage && (
-        <div className={`notice notice-success ${statusMessageFading ? "fade-out" : ""}`}>
+        <div
+          className={`notice notice-success ${statusMessageFading ? "fade-out" : ""}`}
+        >
           {statusMessage}
         </div>
       )}
 
       {createModalOpen && (
-        <div className="modal-backdrop" onClick={() => setCreateModalOpen(false)}>
+        <div
+          className="modal-backdrop"
+          onClick={() => setCreateModalOpen(false)}
+        >
           <div className="modal" onClick={(event) => event.stopPropagation()}>
             <div className="modal-header">
               <h3 style={{ margin: 0 }}>Create User</h3>
-              <button className="button ghost" type="button" onClick={() => setCreateModalOpen(false)}>
+              <button
+                className="button ghost"
+                type="button"
+                onClick={() => setCreateModalOpen(false)}
+              >
                 Close
               </button>
             </div>
             <form className="form-grid" onSubmit={handleSubmit}>
               <label>
                 First Name
-                <input required value={form.first_name} onChange={(e) => handleChange("first_name", e.target.value)} />
+                <input
+                  required
+                  value={form.first_name}
+                  onChange={(e) => handleChange("first_name", e.target.value)}
+                />
               </label>
               <label>
                 Last Name
-                <input required value={form.last_name} onChange={(e) => handleChange("last_name", e.target.value)} />
+                <input
+                  required
+                  value={form.last_name}
+                  onChange={(e) => handleChange("last_name", e.target.value)}
+                />
               </label>
               <label>
                 Email
@@ -327,24 +371,40 @@ export default function Users() {
                   required
                   type="password"
                   value={form.confirm_password}
-                  onChange={(e) => handleChange("confirm_password", e.target.value)}
+                  onChange={(e) =>
+                    handleChange("confirm_password", e.target.value)
+                  }
                 />
               </label>
               <label>
                 Phone
-                <input value={form.phone} onChange={(e) => handleChange("phone", e.target.value)} />
+                <input
+                  value={form.phone}
+                  onChange={(e) => handleChange("phone", e.target.value)}
+                />
               </label>
               <label>
                 Job Title
-                <input required value={form.job_title} onChange={(e) => handleChange("job_title", e.target.value)} />
+                <input
+                  required
+                  value={form.job_title}
+                  onChange={(e) => handleChange("job_title", e.target.value)}
+                />
               </label>
               <label>
                 Organization
-                <input required value={form.organization} onChange={(e) => handleChange("organization", e.target.value)} />
+                <input
+                  required
+                  value={form.organization}
+                  onChange={(e) => handleChange("organization", e.target.value)}
+                />
               </label>
               <label>
                 Role
-                <select value={form.role} onChange={(e) => handleChange("role", e.target.value)}>
+                <select
+                  value={form.role}
+                  onChange={(e) => handleChange("role", e.target.value)}
+                >
                   <option value="broker">Broker</option>
                   <option value="sponsor">Sponsor</option>
                   <option value="admin">Admin</option>
@@ -354,7 +414,11 @@ export default function Users() {
                 <button className="button" type="submit">
                   Create User
                 </button>
-                <button className="button ghost" type="button" onClick={() => setCreateModalOpen(false)}>
+                <button
+                  className="button ghost"
+                  type="button"
+                  onClick={() => setCreateModalOpen(false)}
+                >
                   Cancel
                 </button>
               </div>
@@ -370,7 +434,11 @@ export default function Users() {
               <h3 style={{ margin: 0 }}>
                 Set Password: {passwordUser.first_name} {passwordUser.last_name}
               </h3>
-              <button className="button ghost" type="button" onClick={closePasswordModal}>
+              <button
+                className="button ghost"
+                type="button"
+                onClick={closePasswordModal}
+              >
                 Close
               </button>
             </div>
@@ -403,7 +471,11 @@ export default function Users() {
                 <button className="button" type="submit">
                   Save Password
                 </button>
-                <button className="button ghost" type="button" onClick={closePasswordModal}>
+                <button
+                  className="button ghost"
+                  type="button"
+                  onClick={closePasswordModal}
+                >
                   Cancel
                 </button>
               </div>
@@ -412,114 +484,172 @@ export default function Users() {
         </div>
       )}
 
-      <table className="table" style={{ marginTop: 20 }}>
-        <thead>
-          <tr>
-            <th>Name</th>
-            <th>Email</th>
-            <th>Phone</th>
-            <th>Job Title</th>
-            <th>Organization</th>
-            <th>Role</th>
-            <th>Actions</th>
-          </tr>
-        </thead>
-        <tbody>
-          {pagination.pageItems.map((user) => {
-            const isEditing = editingId === user.id;
-            return (
-              <tr key={user.id}>
-                <td>
-                  {isEditing ? (
-                    <div className="inline-actions">
-                      <input value={editDraft.first_name} onChange={(e) => handleEditChange("first_name", e.target.value)} />
-                      <input value={editDraft.last_name} onChange={(e) => handleEditChange("last_name", e.target.value)} />
-                    </div>
-                  ) : (
-                    `${user.first_name} ${user.last_name}`
-                  )}
-                </td>
-                <td>
-                  {isEditing ? (
-                    <input value={editDraft.email} onChange={(e) => handleEditChange("email", e.target.value)} />
-                  ) : (
-                    user.email
-                  )}
-                </td>
-                <td>
-                  {isEditing ? (
-                    <input value={editDraft.phone} onChange={(e) => handleEditChange("phone", e.target.value)} />
-                  ) : (
-                    user.phone || "—"
-                  )}
-                </td>
-                <td>
-                  {isEditing ? (
-                    <input value={editDraft.job_title} onChange={(e) => handleEditChange("job_title", e.target.value)} />
-                  ) : (
-                    user.job_title
-                  )}
-                </td>
-                <td>
-                  {isEditing ? (
-                    <input
-                      value={editDraft.organization}
-                      onChange={(e) => handleEditChange("organization", e.target.value)}
-                    />
-                  ) : (
-                    user.organization
-                  )}
-                </td>
-                <td>
-                  {isEditing ? (
-                    <select value={editDraft.role} onChange={(e) => handleEditChange("role", e.target.value)}>
-                      <option value="broker">Broker</option>
-                      <option value="sponsor">Sponsor</option>
-                      <option value="admin">Admin</option>
-                    </select>
-                  ) : (
-                    <span className="badge primary">{user.role}</span>
-                  )}
-                </td>
-                <td>
-                  {isEditing ? (
-                    <div className="inline-actions">
-                      <button className="button secondary" type="button" onClick={() => handleEditSave(user.id)}>
-                        Save
-                      </button>
-                      <button className="button ghost" type="button" onClick={() => setEditingId(null)}>
-                        Cancel
-                      </button>
-                    </div>
-                  ) : (
-                    <div className="inline-actions">
-                      <button className="button ghost" type="button" onClick={() => startEdit(user)}>
-                        Edit
-                      </button>
-                      <button className="button ghost" type="button" onClick={() => openPasswordModal(user)}>
-                        Password
-                      </button>
-                      <button className="button secondary" type="button" onClick={() => toggleAssign(user)}>
-                        {assignUserId === user.id ? "Close" : "Assign"}
-                      </button>
-                      <button className="button" type="button" onClick={() => handleDelete(user)}>
-                        Delete
-                      </button>
-                    </div>
-                  )}
+      <div className="table-scroll">
+        <table className="table" style={{ marginTop: 20 }}>
+          <thead>
+            <tr>
+              <th>Name</th>
+              <th>Email</th>
+              <th>Phone</th>
+              <th>Job Title</th>
+              <th>Organization</th>
+              <th>Role</th>
+              <th>Actions</th>
+            </tr>
+          </thead>
+          <tbody>
+            {pagination.pageItems.map((user) => {
+              const isEditing = editingId === user.id;
+              return (
+                <tr key={user.id}>
+                  <td>
+                    {isEditing ? (
+                      <div className="inline-actions">
+                        <input
+                          value={editDraft.first_name}
+                          onChange={(e) =>
+                            handleEditChange("first_name", e.target.value)
+                          }
+                        />
+                        <input
+                          value={editDraft.last_name}
+                          onChange={(e) =>
+                            handleEditChange("last_name", e.target.value)
+                          }
+                        />
+                      </div>
+                    ) : (
+                      `${user.first_name} ${user.last_name}`
+                    )}
+                  </td>
+                  <td>
+                    {isEditing ? (
+                      <input
+                        value={editDraft.email}
+                        onChange={(e) =>
+                          handleEditChange("email", e.target.value)
+                        }
+                      />
+                    ) : (
+                      user.email
+                    )}
+                  </td>
+                  <td>
+                    {isEditing ? (
+                      <input
+                        value={editDraft.phone}
+                        onChange={(e) =>
+                          handleEditChange("phone", e.target.value)
+                        }
+                      />
+                    ) : (
+                      user.phone || "—"
+                    )}
+                  </td>
+                  <td>
+                    {isEditing ? (
+                      <input
+                        value={editDraft.job_title}
+                        onChange={(e) =>
+                          handleEditChange("job_title", e.target.value)
+                        }
+                      />
+                    ) : (
+                      user.job_title
+                    )}
+                  </td>
+                  <td>
+                    {isEditing ? (
+                      <input
+                        value={editDraft.organization}
+                        onChange={(e) =>
+                          handleEditChange("organization", e.target.value)
+                        }
+                      />
+                    ) : (
+                      user.organization
+                    )}
+                  </td>
+                  <td>
+                    {isEditing ? (
+                      <select
+                        value={editDraft.role}
+                        onChange={(e) =>
+                          handleEditChange("role", e.target.value)
+                        }
+                      >
+                        <option value="broker">Broker</option>
+                        <option value="sponsor">Sponsor</option>
+                        <option value="admin">Admin</option>
+                      </select>
+                    ) : (
+                      <span className="badge primary">{user.role}</span>
+                    )}
+                  </td>
+                  <td>
+                    {isEditing ? (
+                      <div className="inline-actions">
+                        <button
+                          className="button secondary"
+                          type="button"
+                          onClick={() => handleEditSave(user.id)}
+                        >
+                          Save
+                        </button>
+                        <button
+                          className="button ghost"
+                          type="button"
+                          onClick={() => setEditingId(null)}
+                        >
+                          Cancel
+                        </button>
+                      </div>
+                    ) : (
+                      <div className="inline-actions">
+                        <button
+                          className="button ghost"
+                          type="button"
+                          onClick={() => startEdit(user)}
+                        >
+                          Edit
+                        </button>
+                        <button
+                          className="button ghost"
+                          type="button"
+                          onClick={() => openPasswordModal(user)}
+                        >
+                          Password
+                        </button>
+                        <button
+                          className="button secondary"
+                          type="button"
+                          onClick={() => toggleAssign(user)}
+                        >
+                          {assignUserId === user.id ? "Close" : "Assign"}
+                        </button>
+                        <button
+                          className="button"
+                          type="button"
+                          onClick={() => handleDelete(user)}
+                        >
+                          Delete
+                        </button>
+                      </div>
+                    )}
+                  </td>
+                </tr>
+              );
+            })}
+            {users.length === 0 && (
+              <tr>
+                <td colSpan={7} className="helper">
+                  No users yet.
                 </td>
               </tr>
-            );
-          })}
-          {users.length === 0 && (
-            <tr>
-              <td colSpan={7} className="helper">
-                No users yet.
-              </td>
-            </tr>
-          )}
-        </tbody>
-      </table>
+            )}
+          </tbody>
+        </table>
+      </div>
       <TablePagination
         page={pagination.currentPage}
         totalItems={users.length}
@@ -572,7 +702,9 @@ export default function Users() {
                   />
                   <span>
                     {task.title}
-                    {task.installation_company ? ` · ${task.installation_company}` : ""}
+                    {task.installation_company
+                      ? ` · ${task.installation_company}`
+                      : ""}
                   </span>
                 </label>
               ))}

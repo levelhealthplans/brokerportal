@@ -85,7 +85,10 @@ a {
   font-size: 14px;
   font-weight: 600;
   color: #17224e;
-  transition: background 0.15s ease, color 0.15s ease, transform 0.15s ease;
+  transition:
+    background 0.15s ease,
+    color 0.15s ease,
+    transform 0.15s ease;
 }
 
 .side-link:hover {
@@ -189,6 +192,18 @@ a {
   width: 100%;
   border-collapse: collapse;
   font-size: 14px;
+}
+
+.table-scroll {
+  width: 100%;
+  overflow-x: auto;
+  overflow-y: hidden;
+  -webkit-overflow-scrolling: touch;
+}
+
+.table-scroll .table {
+  width: max-content;
+  min-width: 100%;
 }
 
 .table th,
@@ -396,6 +411,10 @@ a {
   overflow: auto;
   border: 1px solid #d8deee;
   border-radius: 10px;
+}
+
+.assignment-zip-scroll .table-scroll {
+  border-radius: 0;
 }
 
 .button.ghost {
@@ -687,7 +706,9 @@ textarea {
   border: 1px solid #3f4d5e;
   font-size: 13px;
   color: #000000;
-  transition: opacity 0.45s ease, transform 0.45s ease;
+  transition:
+    opacity 0.45s ease,
+    transform 0.45s ease;
 }
 
 .notice.notice-success {
@@ -1129,5 +1150,21 @@ textarea {
   .dashboard-activity-row {
     grid-template-columns: 1fr;
     gap: 2px;
+  }
+  .table-scroll {
+    margin-inline: -4px;
+    padding-inline: 4px;
+    padding-bottom: 2px;
+  }
+  .table th,
+  .table td {
+    padding: 8px 10px;
+  }
+  .table-pagination {
+    align-items: flex-start;
+  }
+  .table-pagination-controls {
+    width: 100%;
+    justify-content: flex-start;
   }
 }

@@ -16,7 +16,12 @@ type MultiSelectDropdownProps = {
   onChange: (values: string[]) => void;
 };
 
-function MultiSelectDropdown({ label, options, selected, onChange }: MultiSelectDropdownProps) {
+function MultiSelectDropdown({
+  label,
+  options,
+  selected,
+  onChange,
+}: MultiSelectDropdownProps) {
   const toggle = (value: string) => {
     if (selected.includes(value)) {
       onChange(selected.filter((item) => item !== value));
@@ -29,8 +34,8 @@ function MultiSelectDropdown({ label, options, selected, onChange }: MultiSelect
     selected.length === 0
       ? "All"
       : selected.length === 1
-      ? selected[0]
-      : `${selected.length} selected`;
+        ? selected[0]
+        : `${selected.length} selected`;
 
   return (
     <div className="multi-dropdown-field">
@@ -45,7 +50,9 @@ function MultiSelectDropdown({ label, options, selected, onChange }: MultiSelect
               className={`multi-dropdown-option ${selected.includes(option) ? "selected" : ""}`}
               onClick={() => toggle(option)}
             >
-              <span className="multi-dropdown-check">{selected.includes(option) ? "✓" : ""}</span>
+              <span className="multi-dropdown-check">
+                {selected.includes(option) ? "✓" : ""}
+              </span>
               <span>{option}</span>
             </button>
           ))}
@@ -66,7 +73,7 @@ export default function QuotesList() {
   const [effectiveFrom, setEffectiveFrom] = useState("");
   const [effectiveTo, setEffectiveTo] = useState("");
   const [sortBy, setSortBy] = useState<"effective_date" | "status" | "network">(
-    "effective_date"
+    "effective_date",
   );
   const [sortDirection, setSortDirection] = useState<"asc" | "desc">("desc");
   const [page, setPage] = useState(1);
@@ -82,16 +89,19 @@ export default function QuotesList() {
       .then((users) =>
         setUserNameById(
           Object.fromEntries(
-            users.map((user) => [user.id, `${user.first_name} ${user.last_name}`.trim()])
-          )
-        )
+            users.map((user) => [
+              user.id,
+              `${user.first_name} ${user.last_name}`.trim(),
+            ]),
+          ),
+        ),
       )
       .catch(() => setUserNameById({}));
   }, [role, email]);
 
   const handleDeleteQuote = async (quote: Quote) => {
     const confirmed = window.confirm(
-      `Delete quote "${quote.company}"? This removes related uploads, assignment history, and implementation data.`
+      `Delete quote "${quote.company}"? This removes related uploads, assignment history, and implementation data.`,
     );
     if (!confirmed) return;
     setDeletingQuoteId(quote.id);
@@ -111,7 +121,10 @@ export default function QuotesList() {
   useEffect(() => {
     const handleOutsideClick = (event: MouseEvent) => {
       const target = event.target as Node | null;
-      if (!filtersRef.current || (target && filtersRef.current.contains(target))) {
+      if (
+        !filtersRef.current ||
+        (target && filtersRef.current.contains(target))
+      ) {
         return;
       }
       document
@@ -124,10 +137,10 @@ export default function QuotesList() {
 
   const statusOptions = useMemo(
     () =>
-      Array.from(new Set(quotes.map((quote) => getQuoteStageLabel(quote.status)))).sort(
-        (a, b) => a.localeCompare(b)
-      ),
-    [quotes]
+      Array.from(
+        new Set(quotes.map((quote) => getQuoteStageLabel(quote.status))),
+      ).sort((a, b) => a.localeCompare(b)),
+    [quotes],
   );
 
   const networkOptions = useMemo(
@@ -135,15 +148,16 @@ export default function QuotesList() {
       Array.from(
         new Set(
           quotes.map((quote) => {
-            if (quote.manual_network) return formatNetworkLabel(quote.manual_network);
+            if (quote.manual_network)
+              return formatNetworkLabel(quote.manual_network);
             if (quote.latest_assignment) {
               return formatNetworkLabel(quote.latest_assignment.recommendation);
             }
             return NO_NETWORK_LABEL;
-          })
-        )
+          }),
+        ),
       ).sort((a, b) => a.localeCompare(b)),
-    [quotes]
+    [quotes],
   );
 
   const visibleQuotes = useMemo(() => {
@@ -152,15 +166,17 @@ export default function QuotesList() {
       const quoteNetwork = quote.manual_network
         ? formatNetworkLabel(quote.manual_network)
         : quote.latest_assignment
-        ? formatNetworkLabel(quote.latest_assignment.recommendation)
-        : NO_NETWORK_LABEL;
+          ? formatNetworkLabel(quote.latest_assignment.recommendation)
+          : NO_NETWORK_LABEL;
       const quoteEffective = quote.effective_date || "";
       const matchesStatus =
         statusFilters.length === 0 || statusFilters.includes(quoteStatus);
       const matchesNetwork =
         networkFilters.length === 0 || networkFilters.includes(quoteNetwork);
-      const matchesFrom = !effectiveFrom || (quoteEffective && quoteEffective >= effectiveFrom);
-      const matchesTo = !effectiveTo || (quoteEffective && quoteEffective <= effectiveTo);
+      const matchesFrom =
+        !effectiveFrom || (quoteEffective && quoteEffective >= effectiveFrom);
+      const matchesTo =
+        !effectiveTo || (quoteEffective && quoteEffective <= effectiveTo);
       return matchesStatus && matchesNetwork && matchesFrom && matchesTo;
     });
 
@@ -178,22 +194,30 @@ export default function QuotesList() {
       const left = a.manual_network
         ? formatNetworkLabel(a.manual_network)
         : a.latest_assignment
-        ? formatNetworkLabel(a.latest_assignment.recommendation)
-        : NO_NETWORK_LABEL;
+          ? formatNetworkLabel(a.latest_assignment.recommendation)
+          : NO_NETWORK_LABEL;
       const right = b.manual_network
         ? formatNetworkLabel(b.manual_network)
         : b.latest_assignment
-        ? formatNetworkLabel(b.latest_assignment.recommendation)
-        : NO_NETWORK_LABEL;
+          ? formatNetworkLabel(b.latest_assignment.recommendation)
+          : NO_NETWORK_LABEL;
       return left.localeCompare(right);
     });
 
     return sortDirection === "asc" ? sorted : sorted.reverse();
-  }, [quotes, statusFilters, networkFilters, effectiveFrom, effectiveTo, sortBy, sortDirection]);
+  }, [
+    quotes,
+    statusFilters,
+    networkFilters,
+    effectiveFrom,
+    effectiveTo,
+    sortBy,
+    sortDirection,
+  ]);
 
   const pagination = useMemo(
     () => paginateItems(visibleQuotes, page),
-    [visibleQuotes, page]
+    [visibleQuotes, page],
   );
 
   useEffect(() => {
@@ -204,15 +228,24 @@ export default function QuotesList() {
 
   return (
     <section className="section">
-      <div className="inline-actions" style={{ justifyContent: "space-between", marginBottom: 12 }}>
+      <div
+        className="inline-actions"
+        style={{ justifyContent: "space-between", marginBottom: 12 }}
+      >
         <h2 style={{ margin: 0 }}>Quotes</h2>
         <Link className="button" to="/quotes/new">
           New Quote
         </Link>
       </div>
-      {statusMessage && <div className="notice notice-success">{statusMessage}</div>}
+      {statusMessage && (
+        <div className="notice notice-success">{statusMessage}</div>
+      )}
       {error && <div className="notice">{error}</div>}
-      <div ref={filtersRef} className="inline-actions" style={{ marginBottom: 12 }}>
+      <div
+        ref={filtersRef}
+        className="inline-actions"
+        style={{ marginBottom: 12 }}
+      >
         <MultiSelectDropdown
           label="Status"
           options={statusOptions}
@@ -235,14 +268,20 @@ export default function QuotesList() {
         </label>
         <label>
           Effective Date To
-          <input type="date" value={effectiveTo} onChange={(e) => setEffectiveTo(e.target.value)} />
+          <input
+            type="date"
+            value={effectiveTo}
+            onChange={(e) => setEffectiveTo(e.target.value)}
+          />
         </label>
         <label>
           Sort By
           <select
             value={sortBy}
             onChange={(e) =>
-              setSortBy(e.target.value as "effective_date" | "status" | "network")
+              setSortBy(
+                e.target.value as "effective_date" | "status" | "network",
+              )
             }
           >
             <option value="effective_date">Effective Date</option>
@@ -276,71 +315,80 @@ export default function QuotesList() {
           Clear filters
         </button>
       </div>
-      <table className="table">
-        <thead>
-          <tr>
-            <th>Quote ID</th>
-            <th>Group</th>
-            <th>Effective Date</th>
-            <th>Assigned To</th>
-            <th>Status</th>
-            <th>Network</th>
-            {isAdmin && <th>Actions</th>}
-          </tr>
-        </thead>
-        <tbody>
-          {pagination.pageItems.map((quote) => (
-            <tr key={quote.id}>
-              <td>{quote.id.slice(0, 8)}</td>
-              <td>
-                <Link className="table-link" to={`/quotes/${quote.id}`}>
-                  {quote.company}
-                </Link>
-              </td>
-              <td>{quote.effective_date || "—"}</td>
-              <td>{(quote.assigned_user_id && userNameById[quote.assigned_user_id]) || "—"}</td>
-              <td>
-                <span className={`badge ${getQuoteStageClass(quote.status)}`}>
-                  {getQuoteStageLabel(quote.status)}
-                </span>
-              </td>
-              <td>
-                {quote.manual_network ? (
-                  <span className="badge primary">
-                    {formatNetworkLabel(quote.manual_network)} · {MANUAL_SUFFIX}
-                  </span>
-                ) : quote.latest_assignment ? (
-                  <span className="badge primary">
-                    {formatNetworkLabel(quote.latest_assignment.recommendation)} ·{" "}
-                    {Math.round(quote.latest_assignment.confidence * 100)}%
-                  </span>
-                ) : (
-                  <span className="helper">{NO_NETWORK_LABEL}</span>
-                )}
-              </td>
-              {isAdmin && (
-                <td>
-                  <button
-                    className="button"
-                    type="button"
-                    onClick={() => handleDeleteQuote(quote)}
-                    disabled={deletingQuoteId === quote.id}
-                  >
-                    Delete
-                  </button>
-                </td>
-              )}
-            </tr>
-          ))}
-          {visibleQuotes.length === 0 && (
+      <div className="table-scroll">
+        <table className="table">
+          <thead>
             <tr>
-              <td colSpan={isAdmin ? 7 : 6} className="helper">
-                No quotes match current filters.
-              </td>
+              <th>Quote ID</th>
+              <th>Group</th>
+              <th>Effective Date</th>
+              <th>Assigned To</th>
+              <th>Status</th>
+              <th>Network</th>
+              {isAdmin && <th>Actions</th>}
             </tr>
-          )}
-        </tbody>
-      </table>
+          </thead>
+          <tbody>
+            {pagination.pageItems.map((quote) => (
+              <tr key={quote.id}>
+                <td>{quote.id.slice(0, 8)}</td>
+                <td>
+                  <Link className="table-link" to={`/quotes/${quote.id}`}>
+                    {quote.company}
+                  </Link>
+                </td>
+                <td>{quote.effective_date || "—"}</td>
+                <td>
+                  {(quote.assigned_user_id &&
+                    userNameById[quote.assigned_user_id]) ||
+                    "—"}
+                </td>
+                <td>
+                  <span className={`badge ${getQuoteStageClass(quote.status)}`}>
+                    {getQuoteStageLabel(quote.status)}
+                  </span>
+                </td>
+                <td>
+                  {quote.manual_network ? (
+                    <span className="badge primary">
+                      {formatNetworkLabel(quote.manual_network)} ·{" "}
+                      {MANUAL_SUFFIX}
+                    </span>
+                  ) : quote.latest_assignment ? (
+                    <span className="badge primary">
+                      {formatNetworkLabel(
+                        quote.latest_assignment.recommendation,
+                      )}{" "}
+                      · {Math.round(quote.latest_assignment.confidence * 100)}%
+                    </span>
+                  ) : (
+                    <span className="helper">{NO_NETWORK_LABEL}</span>
+                  )}
+                </td>
+                {isAdmin && (
+                  <td>
+                    <button
+                      className="button"
+                      type="button"
+                      onClick={() => handleDeleteQuote(quote)}
+                      disabled={deletingQuoteId === quote.id}
+                    >
+                      Delete
+                    </button>
+                  </td>
+                )}
+              </tr>
+            ))}
+            {visibleQuotes.length === 0 && (
+              <tr>
+                <td colSpan={isAdmin ? 7 : 6} className="helper">
+                  No quotes match current filters.
+                </td>
+              </tr>
+            )}
+          </tbody>
+        </table>
+      </div>
       <TablePagination
         page={pagination.currentPage}
         totalItems={visibleQuotes.length}
