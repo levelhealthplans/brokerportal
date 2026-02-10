@@ -2296,7 +2296,9 @@ def extract_hubspot_invalid_properties(error_message: str) -> List[Dict[str, Any
     if rows:
         return rows
     # Fallback for non-JSON payloads: pull property names from known fragments.
-    names = [name.strip() for name in re.findall(r'"name":"([^"]+)"', payload) if name.strip()]
+    names = [name.strip() for name in re.findall(r'"name"\s*:\s*"([^"]+)"', payload) if name.strip()]
+    if not names:
+        names = [name.strip() for name in re.findall(r"'name'\s*:\s*'([^']+)'", payload) if name.strip()]
     deduped: List[Dict[str, Any]] = []
     for name in names:
         if any(row.get("name") == name for row in deduped):
@@ -2321,6 +2323,26 @@ def remove_invalid_ticket_properties(
     return next_properties, removed_names
 
 
+def sanitize_hubspot_ticket_properties(properties: Dict[str, str]) -> tuple[Dict[str, str], List[str]]:
+    cleaned: Dict[str, str] = {}
+    removed: List[str] = []
+    for raw_name, raw_value in properties.items():
+        name = str(raw_name or "").strip()
+        if not name:
+            continue
+        if is_blocked_hubspot_ticket_property(name):
+            if name not in removed:
+                removed.append(name)
+            continue
+        value = str(raw_value or "").strip()
+        if name == "hs_pipeline_stage" and value and not value.isdigit():
+            if name not in removed:
+                removed.append(name)
+            continue
+        cleaned[name] = value
+    return cleaned, removed
+
+
 def upsert_hubspot_ticket_with_recovery(
     token: str,
     *,
@@ -2329,8 +2351,8 @@ def upsert_hubspot_ticket_with_recovery(
 ) -> tuple[Dict[str, Any], Optional[str]]:
     path = "/crm/v3/objects/tickets" if not ticket_id else f"/crm/v3/objects/tickets/{ticket_id}"
     method = "POST" if not ticket_id else "PATCH"
-    attempt_properties = dict(properties)
-    removed_all: List[str] = []
+    attempt_properties, pre_removed = sanitize_hubspot_ticket_properties(properties)
+    removed_all: List[str] = list(pre_removed)
     for _ in range(3):
         try:
             result = hubspot_api_request(
