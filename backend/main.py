@@ -3233,11 +3233,25 @@ def upload_file_to_hubspot(
 
 
 def associate_hubspot_note_to_ticket(token: str, *, note_id: str, ticket_id: str) -> None:
+    # Prefer v4 default associations since they avoid fragile v3 type IDs.
+    try:
+        associate_hubspot_records_default(
+            token,
+            from_object_type="note",
+            from_object_id=note_id,
+            to_object_type="ticket",
+            to_object_id=ticket_id,
+        )
+        return
+    except Exception as exc:
+        last_exc: Optional[Exception] = exc
+
     candidates = [
-        f"/crm/v3/objects/notes/{note_id}/associations/tickets/{ticket_id}/note_to_ticket",
         f"/crm/v3/objects/notes/{note_id}/associations/ticket/{ticket_id}/note_to_ticket",
+        f"/crm/v3/objects/notes/{note_id}/associations/ticket/{ticket_id}/228",
+        f"/crm/v3/objects/notes/{note_id}/associations/tickets/{ticket_id}/note_to_ticket",
+        f"/crm/v3/objects/notes/{note_id}/associations/tickets/{ticket_id}/228",
     ]
-    last_exc: Optional[Exception] = None
     for path in candidates:
         try:
             hubspot_api_request(token, "PUT", path)

@@ -276,6 +276,43 @@ class HubspotUploadMappingTests(unittest.TestCase):
             self.assertEqual(result["status"], "deleted")
             sync_mock.assert_called_with(quote.id, create_if_missing=False)
 
+    def test_associate_hubspot_note_to_ticket_prefers_v4_default(self) -> None:
+        with patch.object(main, "associate_hubspot_records_default", return_value=None) as assoc_mock, patch.object(
+            main, "hubspot_api_request"
+        ) as v3_mock:
+            main.associate_hubspot_note_to_ticket("token-1", note_id="note-1", ticket_id="ticket-1")
+
+        assoc_mock.assert_called_once_with(
+            "token-1",
+            from_object_type="note",
+            from_object_id="note-1",
+            to_object_type="ticket",
+            to_object_id="ticket-1",
+        )
+        v3_mock.assert_not_called()
+
+    def test_associate_hubspot_note_to_ticket_falls_back_to_v3_variants(self) -> None:
+        with patch.object(
+            main,
+            "associate_hubspot_records_default",
+            side_effect=Exception("v4 unavailable"),
+        ) as assoc_mock, patch.object(
+            main,
+            "hubspot_api_request",
+            side_effect=[
+                Exception("first v3 path failed"),
+                {},
+            ],
+        ) as v3_mock:
+            main.associate_hubspot_note_to_ticket("token-1", note_id="note-2", ticket_id="ticket-2")
+
+        assoc_mock.assert_called_once()
+        self.assertEqual(v3_mock.call_count, 2)
+        first_call = v3_mock.call_args_list[0]
+        second_call = v3_mock.call_args_list[1]
+        self.assertIn("/associations/ticket/ticket-2/note_to_ticket", first_call.args[2])
+        self.assertIn("/associations/ticket/ticket-2/228", second_call.args[2])
+
 
 if __name__ == "__main__":
     unittest.main()
