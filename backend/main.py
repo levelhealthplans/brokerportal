@@ -1457,6 +1457,23 @@ def auth_user_payload(row: sqlite3.Row) -> AuthVerifyOut:
     )
 
 
+def session_user_id(session_user: Any) -> Optional[str]:
+    if not session_user:
+        return None
+    raw_user_id = None
+    try:
+        raw_user_id = session_user["user_id"]
+    except Exception:
+        raw_user_id = None
+    if not raw_user_id:
+        try:
+            raw_user_id = session_user["id"]
+        except Exception:
+            raw_user_id = None
+    user_id = str(raw_user_id or "").strip()
+    return user_id or None
+
+
 def sha256_hex(value: str) -> str:
     return hashlib.sha256(value.encode("utf-8")).hexdigest()
 
@@ -4574,6 +4591,9 @@ def create_quote(payload: QuoteCreate, request: Request) -> QuoteOut:
     status = payload.status or "Draft"
     with get_db() as conn:
         session_user = require_session_user(conn, request)
+        session_user_key = session_user_id(session_user)
+        if not session_user_key:
+            raise HTTPException(status_code=401, detail="Authentication required")
         session_email = normalize_user_email(session_user["email"])
         session_domain = email_domain(session_email)
         session_role = (session_user["role"] or "").strip().lower()
@@ -4627,7 +4647,7 @@ def create_quote(payload: QuoteCreate, request: Request) -> QuoteOut:
                 1 if payload.agent_of_record else 0 if payload.agent_of_record is not None else None,
                 broker_org,
                 sponsor_domain,
-                session_user["id"],
+                session_user_key,
                 payload.manual_network,
                 payload.proposal_url,
                 status,
@@ -5236,6 +5256,9 @@ def list_notifications(request: Request, limit: int = 50) -> List[NotificationOu
     safe_limit = max(1, min(limit, 200))
     with get_db() as conn:
         session_user = require_session_user(conn, request)
+        viewer_user_id = session_user_id(session_user)
+        if not viewer_user_id:
+            raise HTTPException(status_code=401, detail="Authentication required")
         cur = conn.cursor()
         cur.execute(
             """
@@ -5245,7 +5268,7 @@ def list_notifications(request: Request, limit: int = 50) -> List[NotificationOu
             ORDER BY created_at DESC
             LIMIT ?
             """,
-            (session_user["id"], safe_limit),
+            (viewer_user_id, safe_limit),
         )
         rows = cur.fetchall()
     return [to_notification_out(row) for row in rows]
@@ -5255,6 +5278,9 @@ def list_notifications(request: Request, limit: int = 50) -> List[NotificationOu
 def get_notification_unread_count(request: Request) -> NotificationUnreadCountOut:
     with get_db() as conn:
         session_user = require_session_user(conn, request)
+        viewer_user_id = session_user_id(session_user)
+        if not viewer_user_id:
+            raise HTTPException(status_code=401, detail="Authentication required")
         cur = conn.cursor()
         cur.execute(
             """
@@ -5262,7 +5288,7 @@ def get_notification_unread_count(request: Request) -> NotificationUnreadCountOu
             FROM Notification
             WHERE user_id = ? AND COALESCE(is_read, 0) = 0
             """,
-            (session_user["id"],),
+            (viewer_user_id,),
         )
         unread_count = int(cur.fetchone()["cnt"] or 0)
     return NotificationUnreadCountOut(unread_count=unread_count)
@@ -5272,6 +5298,9 @@ def get_notification_unread_count(request: Request) -> NotificationUnreadCountOu
 def mark_notification_read(notification_id: str, request: Request) -> NotificationOut:
     with get_db() as conn:
         session_user = require_session_user(conn, request)
+        viewer_user_id = session_user_id(session_user)
+        if not viewer_user_id:
+            raise HTTPException(status_code=401, detail="Authentication required")
         read_at = now_iso()
         cur = conn.cursor()
         cur.execute(
@@ -5280,11 +5309,11 @@ def mark_notification_read(notification_id: str, request: Request) -> Notificati
             SET is_read = 1, read_at = ?
             WHERE id = ? AND user_id = ?
             """,
-            (read_at, notification_id, session_user["id"]),
+            (read_at, notification_id, viewer_user_id),
         )
         cur.execute(
             "SELECT * FROM Notification WHERE id = ? AND user_id = ?",
-            (notification_id, session_user["id"]),
+            (notification_id, viewer_user_id),
         )
         row = cur.fetchone()
         if not row:
@@ -5297,6 +5326,9 @@ def mark_notification_read(notification_id: str, request: Request) -> Notificati
 def mark_all_notifications_read(request: Request) -> Dict[str, Any]:
     with get_db() as conn:
         session_user = require_session_user(conn, request)
+        viewer_user_id = session_user_id(session_user)
+        if not viewer_user_id:
+            raise HTTPException(status_code=401, detail="Authentication required")
         read_at = now_iso()
         cur = conn.cursor()
         cur.execute(
@@ -5305,7 +5337,7 @@ def mark_all_notifications_read(request: Request) -> Dict[str, Any]:
             SET is_read = 1, read_at = ?
             WHERE user_id = ? AND COALESCE(is_read, 0) = 0
             """,
-            (read_at, session_user["id"]),
+            (read_at, viewer_user_id),
         )
         updated_count = int(cur.rowcount or 0)
         conn.commit()
