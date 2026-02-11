@@ -2302,11 +2302,22 @@ def hubspot_api_request(
         except Exception:
             detail = str(exc)
         parsed_message = detail
+        payload_obj: Dict[str, Any] = {}
         try:
             parsed = json.loads(detail)
-            parsed_message = str(parsed.get("message") or parsed.get("detail") or detail)
+            if isinstance(parsed, dict):
+                payload_obj = parsed
+            parsed_message = str(payload_obj.get("message") or payload_obj.get("detail") or detail)
         except Exception:
             parsed_message = detail or str(exc)
+        missing_required = extract_hubspot_missing_required_properties(
+            payload_obj,
+            error_message=parsed_message,
+        )
+        if missing_required:
+            suffix = f"Missing required properties: {', '.join(missing_required)}"
+            if suffix not in parsed_message:
+                parsed_message = f"{parsed_message} {suffix}".strip()
         raise HTTPException(
             status_code=502,
             detail=f"HubSpot API error ({exc.code}): {parsed_message}",
@@ -2461,6 +2472,84 @@ def parse_hubspot_allowed_options(error_message: str) -> List[str]:
                 options.append(option)
         return options
     return []
+
+
+def _collect_string_values(value: Any) -> List[str]:
+    results: List[str] = []
+    if isinstance(value, str):
+        candidate = value.strip().strip('"').strip("'")
+        if candidate:
+            results.append(candidate)
+        return results
+    if isinstance(value, list):
+        for item in value:
+            results.extend(_collect_string_values(item))
+        return results
+    if isinstance(value, tuple):
+        for item in value:
+            results.extend(_collect_string_values(item))
+        return results
+    return results
+
+
+def _append_unique_strings(target: List[str], values: List[str]) -> None:
+    for value in values:
+        if value not in target:
+            target.append(value)
+
+
+def extract_hubspot_missing_required_properties(
+    payload: Optional[Dict[str, Any]],
+    *,
+    error_message: str,
+) -> List[str]:
+    message = str(error_message or "")
+    names: List[str] = []
+
+    bracket_patterns = [
+        r"required properties were not set[:\s]*\[(.*?)\]",
+        r"missing required properties[:\s]*\[(.*?)\]",
+    ]
+    for pattern in bracket_patterns:
+        match = re.search(pattern, message, re.IGNORECASE | re.DOTALL)
+        if not match:
+            continue
+        raw = match.group(1)
+        extracted = []
+        for part in raw.split(","):
+            value = part.strip().strip('"').strip("'")
+            if value:
+                extracted.append(value)
+        _append_unique_strings(names, extracted)
+
+    parsed_payload = payload if isinstance(payload, dict) else {}
+    context = parsed_payload.get("context")
+    if isinstance(context, dict):
+        for key, value in context.items():
+            key_text = str(key or "").strip().lower()
+            if key_text in {"properties", "property"} and "required properties were not set" in message.lower():
+                _append_unique_strings(names, _collect_string_values(value))
+                continue
+            if "required" in key_text or "missing" in key_text:
+                _append_unique_strings(names, _collect_string_values(value))
+
+    errors = parsed_payload.get("errors")
+    if isinstance(errors, list):
+        for row in errors:
+            if not isinstance(row, dict):
+                continue
+            row_context = row.get("context")
+            if not isinstance(row_context, dict):
+                continue
+            for key, value in row_context.items():
+                key_text = str(key or "").strip().lower()
+                if key_text in {"properties", "property"} and "required properties were not set" in message.lower():
+                    _append_unique_strings(names, _collect_string_values(value))
+                    continue
+                if "required" in key_text or "missing" in key_text:
+                    _append_unique_strings(names, _collect_string_values(value))
+
+    return names
 
 
 def suggest_hubspot_option_replacement(
