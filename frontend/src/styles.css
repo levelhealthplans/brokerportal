@@ -126,17 +126,51 @@ a {
   gap: 10px;
 }
 
-.session-block {
-  display: flex;
+.account-shell {
+  position: relative;
+}
+
+.account-toggle {
+  min-width: 120px;
+  justify-content: center;
+  gap: 8px;
+}
+
+.account-avatar {
+  width: 22px;
+  height: 22px;
+  border-radius: 999px;
+  display: inline-flex;
   align-items: center;
+  justify-content: center;
+  background: #e4ebfb;
+  color: #1e328f;
+  font-size: 11px;
+  font-weight: 700;
+}
+
+.account-label {
+  font-size: 12px;
+  font-weight: 600;
+}
+
+.account-panel {
+  position: absolute;
+  right: 0;
+  top: calc(100% + 6px);
+  display: flex;
+  flex-direction: column;
   gap: 10px;
+  min-width: 260px;
   background: #f5f8ff;
   border: 1px solid #d8deee;
   border-radius: 12px;
   padding: 10px 12px;
+  z-index: 21;
+  box-shadow: 0 12px 24px rgba(23, 34, 78, 0.14);
 }
 
-.session-block .helper {
+.account-panel .helper {
   color: #17224e;
   opacity: 0.85;
   font-size: 12px;
@@ -1047,6 +1081,10 @@ textarea {
   border: 1px solid #3f4d5e;
 }
 
+.profile-modal {
+  max-width: 560px;
+}
+
 .modal-header {
   display: flex;
   align-items: center;
@@ -1393,10 +1431,8 @@ textarea {
     flex-direction: column;
     align-items: stretch;
   }
-  .session-block {
+  .account-shell {
     width: 100%;
-    justify-content: space-between;
-    flex-wrap: wrap;
   }
   .notification-toggle {
     width: 100%;
@@ -1404,6 +1440,15 @@ textarea {
   .notification-panel {
     position: static;
     width: 100%;
+    box-shadow: none;
+  }
+  .account-toggle {
+    width: 100%;
+  }
+  .account-panel {
+    position: static;
+    width: 100%;
+    min-width: 0;
     box-shadow: none;
   }
   .app-main {

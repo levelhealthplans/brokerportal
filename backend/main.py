@@ -1375,6 +1375,24 @@ class AuthVerifyOut(BaseModel):
     organization: str
 
 
+class AuthProfileOut(BaseModel):
+    email: str
+    role: str
+    first_name: str
+    last_name: str
+    organization: str
+    phone: str
+    job_title: str
+
+
+class AuthProfileUpdateIn(BaseModel):
+    first_name: Optional[str] = None
+    last_name: Optional[str] = None
+    phone: Optional[str] = None
+    job_title: Optional[str] = None
+    password: Optional[str] = None
+
+
 # ----------------------
 # Utility functions
 # ----------------------
@@ -1454,6 +1472,18 @@ def auth_user_payload(row: sqlite3.Row) -> AuthVerifyOut:
         first_name=row["first_name"],
         last_name=row["last_name"],
         organization=row["organization"],
+    )
+
+
+def auth_profile_payload(row: sqlite3.Row) -> AuthProfileOut:
+    return AuthProfileOut(
+        email=row["email"],
+        role=row["role"],
+        first_name=row["first_name"],
+        last_name=row["last_name"],
+        organization=row["organization"],
+        phone=(row["phone"] or "").strip(),
+        job_title=(row["job_title"] or "").strip(),
     )
 
 
@@ -4124,6 +4154,79 @@ def get_auth_me(request: Request) -> AuthVerifyOut:
     with get_db() as conn:
         user = require_session_user(conn, request)
     return auth_user_payload(user)
+
+
+@app.get("/api/auth/profile", response_model=AuthProfileOut)
+def get_auth_profile(request: Request) -> AuthProfileOut:
+    with get_db() as conn:
+        user = require_session_user(conn, request)
+    return auth_profile_payload(user)
+
+
+@app.patch("/api/auth/profile", response_model=AuthProfileOut)
+def update_auth_profile(payload: AuthProfileUpdateIn, request: Request) -> AuthProfileOut:
+    updates = payload.dict(exclude_unset=True)
+    if not updates:
+        raise HTTPException(status_code=400, detail="No profile updates provided")
+
+    with get_db() as conn:
+        session_user = require_session_user(conn, request)
+        user_id = session_user_id(session_user)
+        if not user_id:
+            raise HTTPException(status_code=401, detail="Authentication required")
+        cur = conn.cursor()
+        cur.execute("SELECT * FROM User WHERE id = ?", (user_id,))
+        user = cur.fetchone()
+        if not user:
+            raise HTTPException(status_code=404, detail="User not found")
+        data = dict(user)
+
+        if "first_name" in updates:
+            first_name = (updates.get("first_name") or "").strip()
+            if not first_name:
+                raise HTTPException(status_code=400, detail="First name is required")
+            data["first_name"] = first_name
+        if "last_name" in updates:
+            last_name = (updates.get("last_name") or "").strip()
+            if not last_name:
+                raise HTTPException(status_code=400, detail="Last name is required")
+            data["last_name"] = last_name
+        if "job_title" in updates:
+            job_title = (updates.get("job_title") or "").strip()
+            if not job_title:
+                raise HTTPException(status_code=400, detail="Job title is required")
+            data["job_title"] = job_title
+        if "phone" in updates:
+            data["phone"] = (updates.get("phone") or "").strip()
+        if "password" in updates:
+            password_value = require_valid_password(updates.get("password"), required=True)
+            password_salt, password_hash = create_password_credentials(password_value)
+            data["password_salt"] = password_salt
+            data["password_hash"] = password_hash
+
+        data["updated_at"] = now_iso()
+        cur.execute(
+            """
+            UPDATE User
+            SET first_name = ?, last_name = ?, phone = ?, job_title = ?,
+                password_salt = ?, password_hash = ?, updated_at = ?
+            WHERE id = ?
+            """,
+            (
+                data["first_name"],
+                data["last_name"],
+                data.get("phone") or "",
+                data.get("job_title") or "",
+                data.get("password_salt"),
+                data.get("password_hash"),
+                data["updated_at"],
+                user_id,
+            ),
+        )
+        conn.commit()
+        cur.execute("SELECT * FROM User WHERE id = ?", (user_id,))
+        updated = cur.fetchone()
+    return auth_profile_payload(updated)
 
 
 @app.post("/api/auth/logout")

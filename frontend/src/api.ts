@@ -241,6 +241,19 @@ export type AuthUser = {
   organization: string;
 };
 
+export type AuthProfile = AuthUser & {
+  phone: string;
+  job_title: string;
+};
+
+export type AuthProfileUpdate = {
+  first_name?: string;
+  last_name?: string;
+  phone?: string;
+  job_title?: string;
+  password?: string;
+};
+
 export type NetworkMapping = {
   zip: string;
   network: string;
@@ -548,6 +561,18 @@ export function verifyMagicLink(token: string) {
 
 export function getAuthMe() {
   return request<AuthUser>("/auth/me");
+}
+
+export function getAuthProfile() {
+  return request<AuthProfile>("/auth/profile");
+}
+
+export function updateAuthProfile(payload: AuthProfileUpdate) {
+  return request<AuthProfile>("/auth/profile", {
+    method: "PATCH",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(payload),
+  });
 }
 
 export function logoutAuth() {

@@ -1,11 +1,14 @@
 import { useEffect, useMemo, useState } from "react";
 import { Link, NavLink, Navigate, Route, Routes } from "react-router-dom";
 import {
+  AuthProfile,
   Notification,
+  getAuthProfile,
   getNotificationUnreadCount,
   getNotifications,
   markAllNotificationsRead,
   markNotificationRead,
+  updateAuthProfile,
 } from "./api";
 import Dashboard from "./pages/Dashboard";
 import QuotesList from "./pages/QuotesList";
@@ -37,13 +40,42 @@ function formatNotificationTime(value: string): string {
   return parsed.toLocaleString();
 }
 
+type ProfileDraft = {
+  first_name: string;
+  last_name: string;
+  phone: string;
+  job_title: string;
+  email: string;
+  organization: string;
+  password: string;
+  confirm_password: string;
+};
+
+const emptyProfileDraft = (): ProfileDraft => ({
+  first_name: "",
+  last_name: "",
+  phone: "",
+  job_title: "",
+  email: "",
+  organization: "",
+  password: "",
+  confirm_password: "",
+});
+
 function AppShell() {
-  const { role, user, logout } = useAccess();
+  const { role, user, logout, setUser } = useAccess();
   const [notificationsOpen, setNotificationsOpen] = useState(false);
   const [notifications, setNotifications] = useState<Notification[]>([]);
   const [unreadCount, setUnreadCount] = useState(0);
   const [notificationsLoading, setNotificationsLoading] = useState(false);
   const [notificationError, setNotificationError] = useState("");
+  const [accountOpen, setAccountOpen] = useState(false);
+  const [profileOpen, setProfileOpen] = useState(false);
+  const [profileLoading, setProfileLoading] = useState(false);
+  const [profileSaving, setProfileSaving] = useState(false);
+  const [profileError, setProfileError] = useState("");
+  const [profileMessage, setProfileMessage] = useState("");
+  const [profileDraft, setProfileDraft] = useState<ProfileDraft>(emptyProfileDraft());
 
   const loadUnreadCount = async () => {
     const result = await getNotificationUnreadCount();
@@ -102,12 +134,23 @@ function AppShell() {
     setNotifications([]);
     setUnreadCount(0);
     setNotificationError("");
+    setAccountOpen(false);
+    setProfileOpen(false);
+    setProfileDraft(emptyProfileDraft());
+    setProfileError("");
+    setProfileMessage("");
   }, [user?.email]);
 
   const unreadBadgeText = useMemo(() => (unreadCount > 99 ? "99+" : String(unreadCount)), [unreadCount]);
+  const userInitials = useMemo(() => {
+    const first = (user?.first_name || "").trim().charAt(0).toUpperCase();
+    const last = (user?.last_name || "").trim().charAt(0).toUpperCase();
+    return `${first}${last}` || "U";
+  }, [user?.first_name, user?.last_name]);
 
   const handleToggleNotifications = async () => {
     const nextOpen = !notificationsOpen;
+    setAccountOpen(false);
     setNotificationsOpen(nextOpen);
     try {
       if (nextOpen) {
@@ -159,6 +202,80 @@ function AppShell() {
       setNotificationError("");
     } catch (err: any) {
       setNotificationError(err?.message || "Failed to update notifications.");
+    }
+  };
+
+  const loadProfileDraft = (profile: AuthProfile) => {
+    setProfileDraft({
+      first_name: profile.first_name || "",
+      last_name: profile.last_name || "",
+      phone: profile.phone || "",
+      job_title: profile.job_title || "",
+      email: profile.email || "",
+      organization: profile.organization || "",
+      password: "",
+      confirm_password: "",
+    });
+  };
+
+  const handleOpenProfile = async () => {
+    setProfileLoading(true);
+    setProfileError("");
+    setProfileMessage("");
+    try {
+      const profile = await getAuthProfile();
+      loadProfileDraft(profile);
+      setProfileOpen(true);
+      setAccountOpen(false);
+    } catch (err: any) {
+      setProfileError(err?.message || "Failed to load profile.");
+      setProfileOpen(true);
+    } finally {
+      setProfileLoading(false);
+    }
+  };
+
+  const handleSaveProfile = async () => {
+    const firstName = profileDraft.first_name.trim();
+    const lastName = profileDraft.last_name.trim();
+    const jobTitle = profileDraft.job_title.trim();
+    const phone = profileDraft.phone.trim();
+    const password = profileDraft.password;
+    const confirmPassword = profileDraft.confirm_password;
+
+    if (!firstName || !lastName || !jobTitle) {
+      setProfileError("First name, last name, and job title are required.");
+      return;
+    }
+    if (password && password !== confirmPassword) {
+      setProfileError("Password confirmation does not match.");
+      return;
+    }
+
+    setProfileSaving(true);
+    setProfileError("");
+    setProfileMessage("");
+    try {
+      const updated = await updateAuthProfile({
+        first_name: firstName,
+        last_name: lastName,
+        phone,
+        job_title: jobTitle,
+        password: password || undefined,
+      });
+      setUser({
+        email: updated.email,
+        role: updated.role,
+        first_name: updated.first_name,
+        last_name: updated.last_name,
+        organization: updated.organization,
+      });
+      loadProfileDraft(updated);
+      setProfileMessage("Profile updated.");
+    } catch (err: any) {
+      setProfileError(err?.message || "Failed to save profile.");
+    } finally {
+      setProfileSaving(false);
     }
   };
 
@@ -292,19 +409,45 @@ function AppShell() {
                 </div>
               )}
             </div>
-            <div className="session-block">
-              <div className="helper">
-                Signed in as
-                <br />
-                <strong>
-                  {user?.first_name} {user?.last_name}
-                </strong>
-                <br />
-                {user?.email}
-              </div>
-              <button className="button subtle" type="button" onClick={logout}>
-                Log Out
+            <div className="account-shell">
+              <button
+                className="button subtle account-toggle"
+                type="button"
+                onClick={() => {
+                  setNotificationsOpen(false);
+                  setAccountOpen((prev) => !prev);
+                }}
+              >
+                <span className="account-avatar" aria-hidden="true">
+                  {userInitials}
+                </span>
+                <span className="account-label">Account</span>
               </button>
+              {accountOpen && (
+                <div className="account-panel">
+                  <div className="helper">
+                    <strong>
+                      {user?.first_name} {user?.last_name}
+                    </strong>
+                    <br />
+                    {user?.email}
+                  </div>
+                  <div className="inline-actions">
+                    <button
+                      className="button subtle"
+                      type="button"
+                      onClick={() => {
+                        void handleOpenProfile();
+                      }}
+                    >
+                      Profile settings
+                    </button>
+                    <button className="button subtle" type="button" onClick={logout}>
+                      Log Out
+                    </button>
+                  </div>
+                </div>
+              )}
             </div>
           </div>
         </div>
@@ -324,6 +467,117 @@ function AppShell() {
             <Route path="/admin/users" element={<Users />} />
           </Routes>
         </main>
+        {profileOpen && (
+          <div
+            className="modal-backdrop"
+            onClick={() => {
+              if (profileSaving) return;
+              setProfileOpen(false);
+            }}
+          >
+            <div className="modal profile-modal" onClick={(event) => event.stopPropagation()}>
+              <div className="modal-header">
+                <h3>Profile Settings</h3>
+                <button
+                  className="button subtle"
+                  type="button"
+                  disabled={profileSaving}
+                  onClick={() => setProfileOpen(false)}
+                >
+                  Close
+                </button>
+              </div>
+              {profileLoading ? (
+                <div className="helper">Loading profile...</div>
+              ) : (
+                <>
+                  {profileError && <div className="helper">{profileError}</div>}
+                  {profileMessage && <div className="helper">{profileMessage}</div>}
+                  <div className="form-grid">
+                    <label>
+                      First Name
+                      <input
+                        value={profileDraft.first_name}
+                        onChange={(event) =>
+                          setProfileDraft((prev) => ({ ...prev, first_name: event.target.value }))
+                        }
+                      />
+                    </label>
+                    <label>
+                      Last Name
+                      <input
+                        value={profileDraft.last_name}
+                        onChange={(event) =>
+                          setProfileDraft((prev) => ({ ...prev, last_name: event.target.value }))
+                        }
+                      />
+                    </label>
+                    <label>
+                      Job Title
+                      <input
+                        value={profileDraft.job_title}
+                        onChange={(event) =>
+                          setProfileDraft((prev) => ({ ...prev, job_title: event.target.value }))
+                        }
+                      />
+                    </label>
+                    <label>
+                      Phone
+                      <input
+                        value={profileDraft.phone}
+                        onChange={(event) =>
+                          setProfileDraft((prev) => ({ ...prev, phone: event.target.value }))
+                        }
+                      />
+                    </label>
+                    <label>
+                      Email (Read only)
+                      <input value={profileDraft.email} disabled />
+                    </label>
+                    <label>
+                      Organization (Read only)
+                      <input value={profileDraft.organization} disabled />
+                    </label>
+                    <label>
+                      New Password
+                      <input
+                        type="password"
+                        value={profileDraft.password}
+                        onChange={(event) =>
+                          setProfileDraft((prev) => ({ ...prev, password: event.target.value }))
+                        }
+                        placeholder="Leave blank to keep current password"
+                      />
+                    </label>
+                    <label>
+                      Confirm Password
+                      <input
+                        type="password"
+                        value={profileDraft.confirm_password}
+                        onChange={(event) =>
+                          setProfileDraft((prev) => ({ ...prev, confirm_password: event.target.value }))
+                        }
+                        placeholder="Re-enter new password"
+                      />
+                    </label>
+                  </div>
+                  <div className="inline-actions" style={{ marginTop: 16 }}>
+                    <button
+                      className="button"
+                      type="button"
+                      disabled={profileSaving || profileLoading}
+                      onClick={() => {
+                        void handleSaveProfile();
+                      }}
+                    >
+                      {profileSaving ? "Saving..." : "Save Profile"}
+                    </button>
+                  </div>
+                </>
+              )}
+            </div>
+          </div>
+        )}
         <footer className="tagline">Big care for small business.</footer>
       </div>
     </div>
