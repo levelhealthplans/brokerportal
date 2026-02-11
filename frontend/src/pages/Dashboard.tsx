@@ -174,6 +174,7 @@ export default function Dashboard() {
         ? diffInDays(parseDateOnly(quote.quote_deadline) as Date, today)
         : null;
       const dueSoon = daysToDeadline !== null && daysToDeadline <= 7;
+      const needsActionWindow = daysToDeadline !== null && daysToDeadline <= 2;
 
       if (quote.needs_action) {
         const reason = getNeedsActionReason(quote);
@@ -191,7 +192,7 @@ export default function Dashboard() {
           priority: reason === "Missing census upload" ? 1 : 2,
           tags: [
             "all",
-            "needs_action",
+            needsActionWindow ? "needs_action" : "all",
             dueSoon ? "due_week" : "all",
             stage === "Quote Submitted" || stage === "In Review" ? "submitted" : "all",
           ],
@@ -209,7 +210,7 @@ export default function Dashboard() {
           actionLabel: "Continue Quote",
           dueDate: quote.quote_deadline || null,
           priority: 4,
-          tags: ["all", dueSoon ? "due_week" : "all"],
+          tags: ["all", needsActionWindow ? "needs_action" : "all", dueSoon ? "due_week" : "all"],
         });
       } else if ((stage === "Quote Submitted" || stage === "In Review") && !quote.latest_assignment) {
         items.push({
@@ -221,7 +222,7 @@ export default function Dashboard() {
           actionLabel: "Open Quote",
           dueDate: quote.quote_deadline || null,
           priority: 3,
-          tags: ["all", "submitted", dueSoon ? "due_week" : "all"],
+          tags: ["all", "submitted", needsActionWindow ? "needs_action" : "all", dueSoon ? "due_week" : "all"],
         });
       }
     });
@@ -246,7 +247,7 @@ export default function Dashboard() {
           tags: [
             "all",
             daysToDue !== null && daysToDue <= 7 ? "due_week" : "all",
-            daysToDue !== null && daysToDue < 0 ? "needs_action" : "all",
+            daysToDue !== null && daysToDue <= 2 ? "needs_action" : "all",
           ],
         });
       });
@@ -346,10 +347,10 @@ export default function Dashboard() {
       return stage === "Quote Submitted" || stage === "In Review";
     }).length;
     const openTasks = tasks.filter((task) => !COMPLETED_TASK_STATES.has(task.state)).length;
-    const needsAction = quotes.filter((quote) => quote.needs_action).length;
+    const needsAction = actionItems.filter((item) => item.tags.includes("needs_action")).length;
     const deadlines14 = timelineItems.length;
     return { submittedQuotes, openTasks, needsAction, deadlines14 };
-  }, [quotes, tasks, timelineItems]);
+  }, [quotes, tasks, timelineItems, actionItems]);
 
   return (
     <div>
@@ -388,7 +389,7 @@ export default function Dashboard() {
 
           <section className="section">
             <div className="section-header">
-              <h3>What Needs Action Today</h3>
+              <h3>Needs Action</h3>
               <div className="dashboard-filter-row">
                 <button
                   className={`button subtle ${queueFilter === "needs_action" ? "active-chip" : ""}`}
