@@ -2425,8 +2425,7 @@ def build_hubspot_ticket_properties(quote: Dict[str, Any], settings: Dict[str, A
     }
     if settings.get("pipeline_id"):
         properties["hs_pipeline"] = settings["pipeline_id"]
-    # HubSpot stage IDs are numeric strings; ignore human labels like "Draft".
-    if stage_id and stage_id.isdigit():
+    if stage_id:
         properties["hs_pipeline_stage"] = stage_id
 
     property_mappings = normalize_ticket_property_mappings(settings.get("property_mappings") or {})
@@ -2655,15 +2654,12 @@ def sanitize_hubspot_ticket_properties(properties: Dict[str, str]) -> tuple[Dict
         name = str(raw_name or "").strip()
         if not name:
             continue
-        if is_blocked_hubspot_ticket_property(name):
+        lowered = name.lower()
+        if lowered == "hs_ticket_id" or any(lowered.startswith(prefix) for prefix in HUBSPOT_TICKET_READ_ONLY_PREFIXES):
             if name not in removed:
                 removed.append(name)
             continue
         value = str(raw_value or "").strip()
-        if name == "hs_pipeline_stage" and value and not value.isdigit():
-            if name not in removed:
-                removed.append(name)
-            continue
         cleaned[name] = value
     return cleaned, removed
 

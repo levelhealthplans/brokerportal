@@ -149,6 +149,50 @@ class HubspotUploadMappingTests(unittest.TestCase):
         self.assertEqual(properties["level_health_census_filename"], "members.csv")
         self.assertEqual(properties["level_health_sbc_uploaded"], "false")
 
+    def test_build_ticket_properties_keeps_non_numeric_stage_ids(self) -> None:
+        quote_context = {
+            "id": "q-999",
+            "status": "Draft",
+        }
+        settings = {
+            "quote_status_to_stage": {"Draft": "appointmentscheduled"},
+            "default_stage_id": "",
+            "ticket_subject_template": "Quote {{id}}",
+            "ticket_content_template": "Status: {{status}}",
+            "pipeline_id": "default",
+            "property_mappings": {},
+        }
+
+        properties = main.build_hubspot_ticket_properties(quote_context, settings)
+        sanitized, removed = main.sanitize_hubspot_ticket_properties(properties)
+
+        self.assertEqual(properties["hs_pipeline_stage"], "appointmentscheduled")
+        self.assertEqual(sanitized["hs_pipeline_stage"], "appointmentscheduled")
+        self.assertEqual(removed, [])
+
+    def test_sanitize_hubspot_ticket_properties_keeps_writable_reserved_fields(self) -> None:
+        input_properties = {
+            "subject": "Quote ACME",
+            "content": "Body",
+            "hs_pipeline": "default",
+            "hs_pipeline_stage": "appointmentscheduled",
+            "hs_ticket_id": "12345",
+            "hs_primary_company": "read-only-value",
+            "level_health_company": "ACME",
+        }
+
+        sanitized, removed = main.sanitize_hubspot_ticket_properties(input_properties)
+
+        self.assertEqual(sanitized["subject"], "Quote ACME")
+        self.assertEqual(sanitized["content"], "Body")
+        self.assertEqual(sanitized["hs_pipeline"], "default")
+        self.assertEqual(sanitized["hs_pipeline_stage"], "appointmentscheduled")
+        self.assertEqual(sanitized["level_health_company"], "ACME")
+        self.assertNotIn("hs_ticket_id", sanitized)
+        self.assertNotIn("hs_primary_company", sanitized)
+        self.assertIn("hs_ticket_id", removed)
+        self.assertIn("hs_primary_company", removed)
+
     def test_upload_and_delete_trigger_hubspot_resync(self) -> None:
         quote = self._create_quote()
 
