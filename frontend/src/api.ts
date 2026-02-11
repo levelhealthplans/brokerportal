@@ -405,11 +405,16 @@ async function request<T>(path: string, options?: RequestOptions): Promise<T> {
   const timeout = window.setTimeout(() => controller.abort(), timeoutMs);
   let res: Response;
   try {
-    res = await fetch(`${API_BASE}${path}`, {
+    const method = (requestOptions.method || "GET").toUpperCase();
+    const fetchOptions: RequestInit = {
       credentials: "include",
       ...requestOptions,
       signal: controller.signal,
-    });
+    };
+    if (!requestOptions.cache && method === "GET") {
+      fetchOptions.cache = "no-store";
+    }
+    res = await fetch(`${API_BASE}${path}`, fetchOptions);
   } catch (err: any) {
     if (err?.name === "AbortError") {
       throw new Error("Request timed out. Check that backend is running on port 8000.");

@@ -102,6 +102,7 @@ export default function Tasks() {
   const [error, setError] = useState<string | null>(null);
   const [statusMessage, setStatusMessage] = useState<string | null>(null);
   const [savingTaskId, setSavingTaskId] = useState<string | null>(null);
+  const [editingTaskId, setEditingTaskId] = useState<string | null>(null);
   const [dueDateDrafts, setDueDateDrafts] = useState<Record<string, string>>(
     {},
   );
@@ -212,9 +213,23 @@ export default function Tasks() {
         return;
       }
 
-      await updateTask(task.installation_id, task.id, payload, { role, email });
+      const updatedTask = await updateTask(task.installation_id, task.id, payload, {
+        role,
+        email,
+      });
+      setTasks((prev) =>
+        prev.map((row) => (row.id === task.id ? { ...row, ...updatedTask } : row)),
+      );
+      setDueDateDrafts((prev) => ({
+        ...prev,
+        [task.id]: updatedTask.due_date || "",
+      }));
+      setAssignedUserDrafts((prev) => ({
+        ...prev,
+        [task.id]: updatedTask.assigned_user_id || "",
+      }));
+      setEditingTaskId(null);
       setStatusMessage("Task assignment and due date updated.");
-      await loadTasks();
     } catch (err: any) {
       setError(err.message);
     } finally {
@@ -503,55 +518,94 @@ export default function Tasks() {
                 </td>
                 {isAdmin && (
                   <td>
-                    <div
-                      className="task-actions"
-                      style={{ justifyContent: "flex-start" }}
-                    >
-                      <select
-                        value={assignedUserDrafts[task.id] ?? ""}
-                        onChange={(event) =>
-                          setAssignedUserDrafts((prev) => ({
-                            ...prev,
-                            [task.id]: event.target.value,
-                          }))
-                        }
-                        disabled={savingTaskId === task.id}
+                    {editingTaskId === task.id ? (
+                      <div
+                        className="task-actions"
+                        style={{ justifyContent: "flex-start" }}
                       >
-                        <option value="">Unassigned</option>
-                        {users.map((user) => (
-                          <option key={user.id} value={user.id}>
-                            {`${user.first_name} ${user.last_name}`.trim()}
-                          </option>
-                        ))}
-                      </select>
-                      <input
-                        type="date"
-                        value={dueDateDrafts[task.id] ?? ""}
-                        onChange={(event) =>
+                        <select
+                          value={assignedUserDrafts[task.id] ?? ""}
+                          onChange={(event) =>
+                            setAssignedUserDrafts((prev) => ({
+                              ...prev,
+                              [task.id]: event.target.value,
+                            }))
+                          }
+                          disabled={savingTaskId === task.id}
+                        >
+                          <option value="">Unassigned</option>
+                          {users.map((user) => (
+                            <option key={user.id} value={user.id}>
+                              {`${user.first_name} ${user.last_name}`.trim()}
+                            </option>
+                          ))}
+                        </select>
+                        <input
+                          type="date"
+                          value={dueDateDrafts[task.id] ?? ""}
+                          onChange={(event) =>
+                            setDueDateDrafts((prev) => ({
+                              ...prev,
+                              [task.id]: event.target.value,
+                            }))
+                          }
+                          disabled={savingTaskId === task.id}
+                        />
+                        <button
+                          className="button ghost"
+                          type="button"
+                          onClick={() => handleSaveTaskMeta(task)}
+                          disabled={savingTaskId === task.id}
+                        >
+                          Save
+                        </button>
+                        <button
+                          className="button subtle"
+                          type="button"
+                          onClick={() => {
+                            setDueDateDrafts((prev) => ({
+                              ...prev,
+                              [task.id]: task.due_date || "",
+                            }));
+                            setAssignedUserDrafts((prev) => ({
+                              ...prev,
+                              [task.id]: task.assigned_user_id || "",
+                            }));
+                            setEditingTaskId(null);
+                          }}
+                          disabled={savingTaskId === task.id}
+                        >
+                          Cancel
+                        </button>
+                        <button
+                          className="button"
+                          type="button"
+                          onClick={() => handleDeleteTask(task)}
+                          disabled={savingTaskId === task.id}
+                        >
+                          Delete
+                        </button>
+                      </div>
+                    ) : (
+                      <button
+                        className="button subtle"
+                        type="button"
+                        onClick={() => {
                           setDueDateDrafts((prev) => ({
                             ...prev,
-                            [task.id]: event.target.value,
-                          }))
-                        }
-                        disabled={savingTaskId === task.id}
-                      />
-                      <button
-                        className="button ghost"
-                        type="button"
-                        onClick={() => handleSaveTaskMeta(task)}
-                        disabled={savingTaskId === task.id}
-                      >
-                        Save
-                      </button>
-                      <button
-                        className="button"
-                        type="button"
-                        onClick={() => handleDeleteTask(task)}
+                            [task.id]: task.due_date || "",
+                          }));
+                          setAssignedUserDrafts((prev) => ({
+                            ...prev,
+                            [task.id]: task.assigned_user_id || "",
+                          }));
+                          setEditingTaskId(task.id);
+                        }}
                         disabled={savingTaskId === task.id}
                       >
-                        Delete
+                        Edit
                       </button>
-                    </div>
+                    )}
                   </td>
                 )}
                 <td>
