@@ -40,7 +40,7 @@ const EMPTY_HUBSPOT_SETTINGS: HubSpotSettings = {
   default_stage_id: "",
   sync_quote_to_hubspot: true,
   sync_hubspot_to_quote: true,
-  ticket_subject_template: "Quote {{company}} ({{quote_id}})",
+  ticket_subject_template: "{{company}}",
   ticket_content_template:
     "Company: {{company}}\nQuote ID: {{quote_id}}\nStatus: {{status}}\nEffective Date: {{effective_date}}\nBroker Org: {{broker_org}}",
   property_mappings: {},

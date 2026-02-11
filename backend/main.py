@@ -2020,7 +2020,7 @@ def default_hubspot_settings() -> Dict[str, Any]:
         "default_stage_id": (os.getenv("HUBSPOT_DEFAULT_STAGE_ID", "") or "").strip(),
         "sync_quote_to_hubspot": True,
         "sync_hubspot_to_quote": True,
-        "ticket_subject_template": "Quote {{company}} ({{quote_id}})",
+        "ticket_subject_template": "{{company}}",
         "ticket_content_template": "Company: {{company}}\nQuote ID: {{quote_id}}\nStatus: {{status}}\nEffective Date: {{effective_date}}\nBroker Org: {{broker_org}}",
         "property_mappings": {
             "id": "level_health_quote_id",
@@ -2418,9 +2418,11 @@ def build_hubspot_ticket_properties(quote: Dict[str, Any], settings: Dict[str, A
     status_key = str(quote.get("status") or "").strip()
     mapped_stage = settings["quote_status_to_stage"].get(status_key)
     stage_id = (mapped_stage or settings.get("default_stage_id") or "").strip()
+    employer_name = str(quote.get("company") or "").strip()
 
     properties: Dict[str, str] = {
-        "subject": render_hubspot_template(settings["ticket_subject_template"], quote),
+        "subject": employer_name
+        or render_hubspot_template(settings["ticket_subject_template"], quote),
         "content": render_hubspot_template(settings["ticket_content_template"], quote),
     }
     if settings.get("pipeline_id"):

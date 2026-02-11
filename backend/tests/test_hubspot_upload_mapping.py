@@ -125,6 +125,7 @@ class HubspotUploadMappingTests(unittest.TestCase):
     def test_build_ticket_properties_maps_upload_fields(self) -> None:
         quote_context = {
             "id": "q-123",
+            "company": "Trademark",
             "status": "Draft",
             "census_uploaded": True,
             "census_latest_filename": "members.csv",
@@ -145,6 +146,7 @@ class HubspotUploadMappingTests(unittest.TestCase):
 
         properties = main.build_hubspot_ticket_properties(quote_context, settings)
 
+        self.assertEqual(properties["subject"], "Trademark")
         self.assertEqual(properties["level_health_census_uploaded"], "true")
         self.assertEqual(properties["level_health_census_filename"], "members.csv")
         self.assertEqual(properties["level_health_sbc_uploaded"], "false")
