@@ -334,7 +334,7 @@ export default function QuotesList() {
           <tbody>
             {pagination.pageItems.map((quote) => (
               <tr key={quote.id}>
-                <td>{quote.id.slice(0, 8)}</td>
+                <td>{(quote.hubspot_ticket_id || "").trim() || quote.id}</td>
                 <td>
                   <Link className="table-link" to={`/quotes/${quote.id}`}>
                     {quote.company}

@@ -161,7 +161,7 @@ export default function NetworkAssignments() {
                         {isOpen ? "▾" : "▸"}
                       </button>
                     </td>
-                    <td>{quote.id.slice(0, 8)}</td>
+                    <td>{(quote.hubspot_ticket_id || "").trim() || quote.id}</td>
                     <td>
                       <Link className="table-link" to={`/quotes/${quote.id}`}>
                         {quote.company}
