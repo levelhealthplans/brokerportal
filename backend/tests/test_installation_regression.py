@@ -102,6 +102,82 @@ class InstallationRegressionTests(unittest.TestCase):
             )
         self.assertEqual(updated.broker_phone, "555-3333")
 
+    def test_quote_broker_org_and_sponsor_domain_propagate_to_installation(self) -> None:
+        quote = self._create_quote()
+        installation = self._create_installation(quote.id)
+
+        with patch.object(main, "get_session_user", return_value={"role": "admin"}), patch.object(
+            main, "sync_quote_to_hubspot_async", return_value=None
+        ):
+            updated = main.update_quote(
+                quote.id,
+                main.QuoteUpdate(
+                    broker_org="TWS",
+                    sponsor_domain="twsbenefits.com",
+                ),
+                request=object(),
+            )
+
+        self.assertEqual(updated.broker_org, "TWS")
+        self.assertEqual(updated.sponsor_domain, "twsbenefits.com")
+
+        with main.get_db() as conn:
+            cur = conn.cursor()
+            cur.execute("SELECT broker_org, sponsor_domain FROM Installation WHERE id = ?", (installation.id,))
+            install_row = cur.fetchone()
+            self.assertIsNotNone(install_row)
+            self.assertEqual(install_row["broker_org"], "TWS")
+            self.assertEqual(install_row["sponsor_domain"], "twsbenefits.com")
+
+    def test_backfill_installation_orgs_syncs_stale_values(self) -> None:
+        quote = self._create_quote()
+        installation = self._create_installation(quote.id)
+
+        with main.get_db() as conn:
+            cur = conn.cursor()
+            cur.execute(
+                """
+                UPDATE Installation
+                SET broker_org = ?, sponsor_domain = ?
+                WHERE id = ?
+                """,
+                ("Legacy Brokers KC", "legacybrokerskc.com", installation.id),
+            )
+            cur.execute(
+                """
+                UPDATE Quote
+                SET broker_org = ?, sponsor_domain = ?, updated_at = ?
+                WHERE id = ?
+                """,
+                ("TWS", "twsbenefits.com", main.now_iso(), quote.id),
+            )
+            conn.commit()
+            cur.execute(
+                """
+                SELECT COUNT(*) AS cnt
+                FROM Installation i
+                JOIN Quote q ON q.id = i.quote_id
+                """
+            )
+            scanned_count = int(cur.fetchone()["cnt"] or 0)
+
+        with patch.object(main, "require_session_role", return_value=None):
+            result = main.backfill_installation_orgs(request=object())
+
+        self.assertEqual(result.status, "backfilled")
+        self.assertEqual(result.scanned_installation_count, scanned_count)
+        self.assertEqual(result.updated_installation_count, 1)
+        self.assertEqual(result.updated_broker_org_count, 1)
+        self.assertEqual(result.updated_sponsor_domain_count, 1)
+
+        with main.get_db() as conn:
+            cur = conn.cursor()
+            cur.execute("SELECT broker_org, sponsor_domain FROM Installation WHERE id = ?", (installation.id,))
+            install_row = cur.fetchone()
+            self.assertIsNotNone(install_row)
+            self.assertEqual(install_row["broker_org"], "TWS")
+            self.assertEqual(install_row["sponsor_domain"], "twsbenefits.com")
+
     def test_regress_installation_to_quote_removes_installation(self) -> None:
         quote = self._create_quote()
         installation = self._create_installation(quote.id)

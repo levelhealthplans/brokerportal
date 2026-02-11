@@ -1208,6 +1208,14 @@ class InstallationRegressOut(BaseModel):
     quote_status: str
 
 
+class InstallationOrgBackfillOut(BaseModel):
+    status: str
+    scanned_installation_count: int
+    updated_installation_count: int
+    updated_broker_org_count: int
+    updated_sponsor_domain_count: int
+
+
 class OrganizationIn(BaseModel):
     name: str
     type: str
@@ -5137,6 +5145,22 @@ def update_quote(quote_id: str, payload: QuoteUpdate, request: Request) -> Quote
             """,
             [data.get(c) for c in columns] + [quote_id],
         )
+        install_updates: Dict[str, Optional[str]] = {}
+        if "broker_org" in updates and data.get("broker_org") != quote["broker_org"]:
+            install_updates["broker_org"] = data.get("broker_org")
+        if "sponsor_domain" in updates and data.get("sponsor_domain") != quote["sponsor_domain"]:
+            install_updates["sponsor_domain"] = data.get("sponsor_domain")
+        if install_updates:
+            install_columns = list(install_updates.keys())
+            cur.execute(
+                f"""
+                UPDATE Installation SET
+                    {", ".join([f"{c} = ?" for c in install_columns])},
+                    updated_at = ?
+                WHERE quote_id = ?
+                """,
+                [install_updates[c] for c in install_columns] + [data["updated_at"], quote_id],
+            )
         conn.commit()
         sync_quote_to_hubspot_async(quote_id, create_if_missing=True)
         row = fetch_quote(conn, quote_id)
@@ -5305,6 +5329,59 @@ def cleanup_unassigned_records(request: Request) -> Dict[str, Any]:
         "deleted_task_count_direct": deleted_task_count_direct,
         "updated_installation_count": len(task_installation_ids_to_touch),
     }
+
+
+@app.post("/api/admin/backfill-installation-orgs", response_model=InstallationOrgBackfillOut)
+def backfill_installation_orgs(request: Request) -> InstallationOrgBackfillOut:
+    scanned_installation_count = 0
+    updated_installation_count = 0
+    updated_broker_org_count = 0
+    updated_sponsor_domain_count = 0
+    with get_db() as conn:
+        require_session_role(conn, request, {"admin"})
+        cur = conn.cursor()
+        cur.execute(
+            """
+            SELECT
+                i.id AS installation_id,
+                i.broker_org AS installation_broker_org,
+                i.sponsor_domain AS installation_sponsor_domain,
+                q.broker_org AS quote_broker_org,
+                q.sponsor_domain AS quote_sponsor_domain
+            FROM Installation i
+            JOIN Quote q ON q.id = i.quote_id
+            """
+        )
+        rows = cur.fetchall()
+        scanned_installation_count = len(rows)
+        for row in rows:
+            sets: List[str] = []
+            params: List[Optional[str]] = []
+            if (row["installation_broker_org"] or "") != (row["quote_broker_org"] or ""):
+                sets.append("broker_org = ?")
+                params.append(row["quote_broker_org"])
+                updated_broker_org_count += 1
+            if (row["installation_sponsor_domain"] or "") != (row["quote_sponsor_domain"] or ""):
+                sets.append("sponsor_domain = ?")
+                params.append(row["quote_sponsor_domain"])
+                updated_sponsor_domain_count += 1
+            if sets:
+                sets.append("updated_at = ?")
+                params.append(now_iso())
+                params.append(row["installation_id"])
+                cur.execute(
+                    f"UPDATE Installation SET {', '.join(sets)} WHERE id = ?",
+                    params,
+                )
+                updated_installation_count += 1
+        conn.commit()
+    return InstallationOrgBackfillOut(
+        status="backfilled",
+        scanned_installation_count=scanned_installation_count,
+        updated_installation_count=updated_installation_count,
+        updated_broker_org_count=updated_broker_org_count,
+        updated_sponsor_domain_count=updated_sponsor_domain_count,
+    )
 
 
 @app.post("/api/quotes/{quote_id}/standardize", response_model=StandardizationOut)
