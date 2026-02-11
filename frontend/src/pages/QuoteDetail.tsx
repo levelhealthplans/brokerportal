@@ -64,6 +64,12 @@ export default function QuoteDetail() {
     current_enrolled: "",
     current_eligible: "",
     current_insurance_type: "",
+    primary_network: "",
+    secondary_network: "",
+    tpa: "",
+    stoploss: "",
+    current_carrier: "",
+    renewal_comparison: "",
   });
   const [brokerDraft, setBrokerDraft] = useState({
     broker_first_name: "",
@@ -256,6 +262,12 @@ export default function QuoteDetail() {
       current_enrolled: String(quote.current_enrolled ?? ""),
       current_eligible: String(quote.current_eligible ?? ""),
       current_insurance_type: quote.current_insurance_type || "",
+      primary_network: quote.primary_network || "",
+      secondary_network: quote.secondary_network || "",
+      tpa: quote.tpa || "",
+      stoploss: quote.stoploss || "",
+      current_carrier: quote.current_carrier || "",
+      renewal_comparison: quote.renewal_comparison || "",
     });
   };
 
@@ -691,7 +703,7 @@ export default function QuoteDetail() {
     setBusy(true);
     setError(null);
     try {
-      await updateQuote(quoteId, {
+      const payload: Record<string, string | number | null | undefined> = {
         company: groupDraft.company,
         employer_street: groupDraft.employer_street || null,
         employer_city: groupDraft.employer_city || null,
@@ -704,7 +716,16 @@ export default function QuoteDetail() {
         current_enrolled: toNumberOrUndefined(groupDraft.current_enrolled),
         current_eligible: toNumberOrUndefined(groupDraft.current_eligible),
         current_insurance_type: groupDraft.current_insurance_type,
-      });
+      };
+      if (role === "admin") {
+        payload.primary_network = groupDraft.primary_network || null;
+        payload.secondary_network = groupDraft.secondary_network || null;
+        payload.tpa = groupDraft.tpa || null;
+        payload.stoploss = groupDraft.stoploss || null;
+        payload.current_carrier = groupDraft.current_carrier || null;
+        payload.renewal_comparison = groupDraft.renewal_comparison || null;
+      }
+      await updateQuote(quoteId, payload);
       setStatusMessage("Group info updated.");
       setEditGroupOpen(false);
       refresh();
@@ -984,6 +1005,62 @@ export default function QuoteDetail() {
               }
             />
           </label>
+          {role === "admin" && (
+            <>
+              <label>
+                Primary Network
+                <input
+                  value={groupDraft.primary_network}
+                  onChange={(e) =>
+                    handleGroupDraftChange("primary_network", e.target.value)
+                  }
+                />
+              </label>
+              <label>
+                Secondary Network
+                <input
+                  value={groupDraft.secondary_network}
+                  onChange={(e) =>
+                    handleGroupDraftChange("secondary_network", e.target.value)
+                  }
+                />
+              </label>
+              <label>
+                TPA
+                <input
+                  value={groupDraft.tpa}
+                  onChange={(e) => handleGroupDraftChange("tpa", e.target.value)}
+                />
+              </label>
+              <label>
+                Stoploss
+                <input
+                  value={groupDraft.stoploss}
+                  onChange={(e) =>
+                    handleGroupDraftChange("stoploss", e.target.value)
+                  }
+                />
+              </label>
+              <label>
+                Current Carrier
+                <input
+                  value={groupDraft.current_carrier}
+                  onChange={(e) =>
+                    handleGroupDraftChange("current_carrier", e.target.value)
+                  }
+                />
+              </label>
+              <label>
+                Renewal Comparison
+                <input
+                  value={groupDraft.renewal_comparison}
+                  onChange={(e) =>
+                    handleGroupDraftChange("renewal_comparison", e.target.value)
+                  }
+                />
+              </label>
+            </>
+          )}
           <div className="inline-actions">
             <button
               className="button"
@@ -1027,6 +1104,18 @@ export default function QuoteDetail() {
           <span>{quote.current_eligible}</span>
           <strong>Insurance Type</strong>
           <span>{quote.current_insurance_type}</span>
+          <strong>Primary Network</strong>
+          <span>{quote.primary_network || "—"}</span>
+          <strong>Secondary Network</strong>
+          <span>{quote.secondary_network || "—"}</span>
+          <strong>TPA</strong>
+          <span>{quote.tpa || "—"}</span>
+          <strong>Stoploss</strong>
+          <span>{quote.stoploss || "—"}</span>
+          <strong>Current Carrier</strong>
+          <span>{quote.current_carrier || "—"}</span>
+          <strong>Renewal Comparison</strong>
+          <span>{quote.renewal_comparison || "—"}</span>
         </div>
       )}
 

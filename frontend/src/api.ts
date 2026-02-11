@@ -12,6 +12,12 @@ export type Quote = {
   current_enrolled: number;
   current_eligible: number;
   current_insurance_type: string;
+  primary_network?: string | null;
+  secondary_network?: string | null;
+  tpa?: string | null;
+  stoploss?: string | null;
+  current_carrier?: string | null;
+  renewal_comparison?: string | null;
   employees_eligible: number;
   expected_enrollees: number;
   broker_fee_pepm: number;
@@ -136,6 +142,12 @@ export type QuoteCreatePayload = {
   current_enrolled: number;
   current_eligible: number;
   current_insurance_type: string;
+  primary_network?: string | null;
+  secondary_network?: string | null;
+  tpa?: string | null;
+  stoploss?: string | null;
+  current_carrier?: string | null;
+  renewal_comparison?: string | null;
   employees_eligible: number;
   expected_enrollees: number;
   broker_fee_pepm: number;

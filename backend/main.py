@@ -111,6 +111,14 @@ HUBSPOT_UPLOAD_FIELD_TYPES = [
     ("other_claims_data", "other_claims_data"),
     ("other_files", "other_files"),
 ]
+HUBSPOT_SYNC_DETAIL_FIELDS = (
+    "primary_network",
+    "secondary_network",
+    "tpa",
+    "stoploss",
+    "current_carrier",
+    "renewal_comparison",
+)
 
 BROKER_ADMIN_ONLY_TASKS = {"Vendors Notified", "Ventegra vZip"}
 TASK_STATE_CANONICAL = {
@@ -356,6 +364,12 @@ def init_db() -> None:
                 current_enrolled INTEGER,
                 current_eligible INTEGER,
                 current_insurance_type TEXT,
+                primary_network TEXT,
+                secondary_network TEXT,
+                tpa TEXT,
+                stoploss TEXT,
+                current_carrier TEXT,
+                renewal_comparison TEXT,
                 employees_eligible INTEGER,
                 expected_enrollees INTEGER,
                 broker_fee_pepm REAL,
@@ -616,6 +630,18 @@ def init_db() -> None:
             cur.execute("ALTER TABLE Quote ADD COLUMN current_eligible INTEGER")
         if "current_insurance_type" not in quote_cols:
             cur.execute("ALTER TABLE Quote ADD COLUMN current_insurance_type TEXT")
+        if "primary_network" not in quote_cols:
+            cur.execute("ALTER TABLE Quote ADD COLUMN primary_network TEXT")
+        if "secondary_network" not in quote_cols:
+            cur.execute("ALTER TABLE Quote ADD COLUMN secondary_network TEXT")
+        if "tpa" not in quote_cols:
+            cur.execute("ALTER TABLE Quote ADD COLUMN tpa TEXT")
+        if "stoploss" not in quote_cols:
+            cur.execute("ALTER TABLE Quote ADD COLUMN stoploss TEXT")
+        if "current_carrier" not in quote_cols:
+            cur.execute("ALTER TABLE Quote ADD COLUMN current_carrier TEXT")
+        if "renewal_comparison" not in quote_cols:
+            cur.execute("ALTER TABLE Quote ADD COLUMN renewal_comparison TEXT")
         if "high_cost_info" not in quote_cols:
             cur.execute("ALTER TABLE Quote ADD COLUMN high_cost_info TEXT")
         if "broker_first_name" not in quote_cols:
@@ -1067,6 +1093,12 @@ class QuoteCreate(BaseModel):
     current_enrolled: int
     current_eligible: int
     current_insurance_type: str
+    primary_network: Optional[str] = None
+    secondary_network: Optional[str] = None
+    tpa: Optional[str] = None
+    stoploss: Optional[str] = None
+    current_carrier: Optional[str] = None
+    renewal_comparison: Optional[str] = None
     employees_eligible: int
     expected_enrollees: int
     broker_fee_pepm: float
@@ -1099,6 +1131,12 @@ class QuoteUpdate(BaseModel):
     current_enrolled: Optional[int] = None
     current_eligible: Optional[int] = None
     current_insurance_type: Optional[str] = None
+    primary_network: Optional[str] = None
+    secondary_network: Optional[str] = None
+    tpa: Optional[str] = None
+    stoploss: Optional[str] = None
+    current_carrier: Optional[str] = None
+    renewal_comparison: Optional[str] = None
     employees_eligible: Optional[int] = None
     expected_enrollees: Optional[int] = None
     broker_fee_pepm: Optional[float] = None
@@ -1134,6 +1172,12 @@ class QuoteOut(BaseModel):
     current_enrolled: int
     current_eligible: int
     current_insurance_type: str
+    primary_network: Optional[str]
+    secondary_network: Optional[str]
+    tpa: Optional[str]
+    stoploss: Optional[str]
+    current_carrier: Optional[str]
+    renewal_comparison: Optional[str]
     employees_eligible: int
     expected_enrollees: int
     broker_fee_pepm: float
@@ -3841,11 +3885,25 @@ def sync_quote_from_hubspot(conn: sqlite3.Connection, quote_id: str) -> Dict[str
     if not ticket_id:
         raise HTTPException(status_code=400, detail="Quote is not linked to a HubSpot ticket")
 
+    property_mappings = normalize_ticket_property_mappings(settings.get("property_mappings") or {})
+    requested_properties = ["subject", "hs_pipeline", "hs_pipeline_stage"]
+    for local_key in HUBSPOT_SYNC_DETAIL_FIELDS:
+        mapped_property = str(property_mappings.get(local_key) or "").strip()
+        if mapped_property:
+            requested_properties.append(mapped_property)
+    deduped_properties: List[str] = []
+    seen: set[str] = set()
+    for property_name in requested_properties:
+        if property_name in seen:
+            continue
+        seen.add(property_name)
+        deduped_properties.append(property_name)
+
     ticket = hubspot_api_request(
         token,
         "GET",
         f"/crm/v3/objects/tickets/{ticket_id}",
-        query={"properties": ["subject", "hs_pipeline", "hs_pipeline_stage"]},
+        query={"properties": deduped_properties},
     )
     properties = ticket.get("properties") or {}
     ticket_stage = str(properties.get("hs_pipeline_stage") or "").strip()
@@ -3857,6 +3915,20 @@ def sync_quote_from_hubspot(conn: sqlite3.Connection, quote_id: str) -> Dict[str
     if next_status and next_status != quote["status"]:
         updates.append("status = ?")
         params.append(next_status)
+    for local_key in HUBSPOT_SYNC_DETAIL_FIELDS:
+        mapped_property = str(property_mappings.get(local_key) or "").strip()
+        if not mapped_property:
+            continue
+        raw_value = properties.get(mapped_property)
+        normalized_value: Optional[str]
+        if raw_value is None:
+            normalized_value = None
+        else:
+            text_value = str(raw_value).strip()
+            normalized_value = text_value or None
+        if normalized_value != quote.get(local_key):
+            updates.append(f"{local_key} = ?")
+            params.append(normalized_value)
 
     updates.extend(
         [
@@ -4735,12 +4807,13 @@ def create_quote(payload: QuoteCreate, request: Request) -> QuoteOut:
             INSERT INTO Quote (
                 id, company, employer_street, employer_city, state, employer_zip,
                 employer_domain, quote_deadline, employer_sic, effective_date, current_enrolled,
-                current_eligible, current_insurance_type, employees_eligible,
+                current_eligible, current_insurance_type, primary_network, secondary_network,
+                tpa, stoploss, current_carrier, renewal_comparison, employees_eligible,
                 expected_enrollees, broker_fee_pepm, include_specialty, notes,
                 high_cost_info, broker_first_name, broker_last_name, broker_email,
                 broker_phone, agent_of_record, broker_org, sponsor_domain, assigned_user_id, manual_network, proposal_url, status,
                 version, needs_action, created_at, updated_at
-            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
             """,
             (
                 quote_id,
@@ -4756,6 +4829,12 @@ def create_quote(payload: QuoteCreate, request: Request) -> QuoteOut:
                 payload.current_enrolled,
                 payload.current_eligible,
                 payload.current_insurance_type,
+                payload.primary_network,
+                payload.secondary_network,
+                payload.tpa,
+                payload.stoploss,
+                payload.current_carrier,
+                payload.renewal_comparison,
                 payload.employees_eligible,
                 payload.expected_enrollees,
                 payload.broker_fee_pepm,
@@ -5481,13 +5560,21 @@ def update_quote(quote_id: str, payload: QuoteUpdate, request: Request) -> Quote
             "broker_org",
             "broker_fee_pepm",
         }
-        if any(field in updates for field in broker_info_fields):
+        hubspot_detail_fields = {
+            "primary_network",
+            "secondary_network",
+            "tpa",
+            "stoploss",
+            "current_carrier",
+            "renewal_comparison",
+        }
+        if any(field in updates for field in (broker_info_fields | hubspot_detail_fields)):
             session_user = get_session_user(conn, request)
             role = str(session_user["role"] or "").strip().lower() if session_user else ""
             if role != "admin":
                 raise HTTPException(
                     status_code=403,
-                    detail="Only admin can edit broker information",
+                    detail="Only admin can edit broker or integration detail fields",
                 )
         if "broker_email" in updates and "broker_org" not in updates:
             domain = email_domain(updates.get("broker_email"))
@@ -5520,6 +5607,12 @@ def update_quote(quote_id: str, payload: QuoteUpdate, request: Request) -> Quote
             "current_enrolled",
             "current_eligible",
             "current_insurance_type",
+            "primary_network",
+            "secondary_network",
+            "tpa",
+            "stoploss",
+            "current_carrier",
+            "renewal_comparison",
             "employees_eligible",
             "expected_enrollees",
             "broker_fee_pepm",

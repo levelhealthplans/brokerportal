@@ -215,6 +215,53 @@ class AdminPasswordAuthTests(unittest.TestCase):
         self.assertEqual(quote.assigned_user_id, "session-user-1")
         self.assertEqual(quote.broker_org, "Legacy Brokers KC")
 
+    def test_non_admin_cannot_edit_hubspot_detail_fields(self) -> None:
+        payload = main.QuoteCreate(
+            company="HubSpot Detail Guard Group",
+            employer_street="1 Main St",
+            employer_city="St. Louis",
+            state="MO",
+            employer_zip="63101",
+            employer_domain="group.example.com",
+            quote_deadline="2026-03-01",
+            employer_sic="1234",
+            effective_date="2026-04-01",
+            current_enrolled=10,
+            current_eligible=12,
+            current_insurance_type="Level Funded",
+            employees_eligible=12,
+            expected_enrollees=10,
+            broker_fee_pepm=35.0,
+            include_specialty=False,
+            notes="",
+            high_cost_info="",
+            status="Draft",
+        )
+        session_user = {
+            "id": "session-user-1",
+            "email": "jake@legacybrokerskc.com",
+            "role": "broker",
+            "first_name": "Jake",
+            "last_name": "Page",
+            "phone": "555-1111",
+            "organization": "Legacy Brokers KC",
+        }
+        with patch.object(main, "require_session_user", return_value=session_user), patch.object(
+            main, "sync_quote_to_hubspot_async", return_value=None
+        ):
+            quote = main.create_quote(payload, request=object())
+
+        with patch.object(main, "get_session_user", return_value={"role": "broker"}), patch.object(
+            main, "sync_quote_to_hubspot_async", return_value=None
+        ):
+            with self.assertRaises(HTTPException) as exc:
+                main.update_quote(
+                    quote.id,
+                    main.QuoteUpdate(primary_network="Mercy_MO"),
+                    request=object(),
+                )
+        self.assertEqual(exc.exception.status_code, 403)
+
     def test_list_installations_broker_without_org_mapping_does_not_500(self) -> None:
         with main.get_db() as conn:
             cur = conn.cursor()

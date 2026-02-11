@@ -216,6 +216,59 @@ class HubspotUploadMappingTests(unittest.TestCase):
             properties=["level_health_quote_id", "subject", "hs_pipeline_stage"],
         )
 
+    def test_sync_quote_from_hubspot_updates_network_detail_fields(self) -> None:
+        quote = self._create_quote()
+        with main.get_db() as conn:
+            cur = conn.cursor()
+            cur.execute(
+                "UPDATE Quote SET hubspot_ticket_id = ? WHERE id = ?",
+                ("ticket-123", quote.id),
+            )
+            conn.commit()
+
+        settings = {
+            "enabled": True,
+            "sync_hubspot_to_quote": True,
+            "portal_id": "7106327",
+            "stage_to_quote_status": {},
+            "property_mappings": {
+                "primary_network": "level_health_primary_network",
+                "secondary_network": "level_health_secondary_network",
+                "tpa": "level_health_tpa",
+                "stoploss": "level_health_stoploss",
+                "current_carrier": "level_health_current_carrier",
+                "renewal_comparison": "level_health_renewal_comparison",
+            },
+        }
+        ticket = {
+            "properties": {
+                "hs_pipeline_stage": "",
+                "level_health_primary_network": "Mercy_MO",
+                "level_health_secondary_network": "Cigna_PPO",
+                "level_health_tpa": "UHC",
+                "level_health_stoploss": "Sun Life",
+                "level_health_current_carrier": "Aetna",
+                "level_health_renewal_comparison": "12% increase",
+            }
+        }
+
+        with main.get_db() as conn, patch.object(
+            main, "read_hubspot_settings", return_value=settings
+        ), patch.object(
+            main, "resolve_hubspot_api_token", return_value="token-1"
+        ), patch.object(
+            main, "hubspot_api_request", return_value=ticket
+        ):
+            main.sync_quote_from_hubspot(conn, quote.id)
+            refreshed = dict(main.fetch_quote(conn, quote.id))
+
+        self.assertEqual(refreshed["primary_network"], "Mercy_MO")
+        self.assertEqual(refreshed["secondary_network"], "Cigna_PPO")
+        self.assertEqual(refreshed["tpa"], "UHC")
+        self.assertEqual(refreshed["stoploss"], "Sun Life")
+        self.assertEqual(refreshed["current_carrier"], "Aetna")
+        self.assertEqual(refreshed["renewal_comparison"], "12% increase")
+
     def test_sync_hubspot_ticket_file_attachments_is_idempotent(self) -> None:
         quote = self._create_quote()
         with patch.object(main, "sync_quote_to_hubspot_async", return_value=None):
