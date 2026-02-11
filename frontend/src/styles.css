@@ -113,6 +113,36 @@ a {
   padding: 14px 6px 12px;
 }
 
+.app-toolbar {
+  display: flex;
+  justify-content: flex-end;
+  padding: 0 6px 8px;
+}
+
+.app-toolbar-controls {
+  display: flex;
+  align-items: flex-start;
+  justify-content: flex-end;
+  gap: 10px;
+}
+
+.session-block {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  background: #f5f8ff;
+  border: 1px solid #d8deee;
+  border-radius: 12px;
+  padding: 10px 12px;
+}
+
+.session-block .helper {
+  color: #17224e;
+  opacity: 0.85;
+  font-size: 12px;
+  line-height: 1.35;
+}
+
 .access-switcher {
   margin-top: auto;
   display: grid;
@@ -147,6 +177,7 @@ a {
 }
 
 .notifications-shell {
+  position: relative;
   display: flex;
   flex-direction: column;
   gap: 8px;
@@ -154,7 +185,7 @@ a {
 
 .notification-toggle {
   justify-content: space-between;
-  width: 100%;
+  min-width: 160px;
 }
 
 .notification-count {
@@ -172,6 +203,9 @@ a {
 }
 
 .notification-panel {
+  position: absolute;
+  right: 0;
+  top: calc(100% + 6px);
   border: 1px solid #d8deee;
   background: #ffffff;
   border-radius: 10px;
@@ -179,8 +213,11 @@ a {
   display: flex;
   flex-direction: column;
   gap: 8px;
+  width: min(460px, 88vw);
   max-height: 320px;
   overflow: auto;
+  z-index: 20;
+  box-shadow: 0 12px 24px rgba(23, 34, 78, 0.14);
 }
 
 .notification-panel-header {
@@ -1347,6 +1384,27 @@ textarea {
     text-align: center;
     padding: 9px 8px;
     font-size: 13px;
+  }
+  .app-toolbar {
+    padding: 0 0 8px;
+  }
+  .app-toolbar-controls {
+    width: 100%;
+    flex-direction: column;
+    align-items: stretch;
+  }
+  .session-block {
+    width: 100%;
+    justify-content: space-between;
+    flex-wrap: wrap;
+  }
+  .notification-toggle {
+    width: 100%;
+  }
+  .notification-panel {
+    position: static;
+    width: 100%;
+    box-shadow: none;
   }
   .app-main {
     padding: 0;

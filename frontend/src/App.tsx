@@ -209,101 +209,105 @@ function AppShell() {
             </NavLink>
           )}
         </div>
-        <div className="access-switcher">
-          <div className="notifications-shell">
-            <button
-              className="button subtle notification-toggle"
-              type="button"
-              onClick={() => {
-                void handleToggleNotifications();
-              }}
-            >
-              Notifications
-              {unreadCount > 0 && <span className="notification-count">{unreadBadgeText}</span>}
-            </button>
-            {notificationsOpen && (
-              <div className="notification-panel">
-                <div className="notification-panel-header">
-                  <strong>Notifications</strong>
-                  <button
-                    className="button subtle"
-                    type="button"
-                    disabled={unreadCount === 0}
-                    onClick={() => {
-                      void handleMarkAllRead();
-                    }}
-                  >
-                    Mark all read
-                  </button>
-                </div>
-                {notificationsLoading && <div className="helper">Loading...</div>}
-                {!notificationsLoading && notificationError && (
-                  <div className="helper">{notificationError}</div>
-                )}
-                {!notificationsLoading && !notificationError && notifications.length === 0 && (
-                  <div className="helper">No notifications yet.</div>
-                )}
-                {!notificationsLoading &&
-                  !notificationError &&
-                  notifications.map((notification) => {
-                    const href = resolveNotificationHref(notification);
-                    return (
-                      <div
-                        key={notification.id}
-                        className={`notification-item${notification.is_read ? "" : " unread"}`}
-                      >
-                        <div className="notification-item-head">
-                          <strong>{notification.title}</strong>
-                          <span className="helper">{formatNotificationTime(notification.created_at)}</span>
-                        </div>
-                        <div className="helper">{notification.body}</div>
-                        <div className="notification-item-actions">
-                          {href ? (
-                            <Link
-                              className="button subtle"
-                              to={href}
-                              onClick={() => {
-                                void handleNotificationOpen(notification);
-                              }}
-                            >
-                              Open
-                            </Link>
-                          ) : (
-                            <span />
-                          )}
-                          {!notification.is_read && (
-                            <button
-                              className="button subtle"
-                              type="button"
-                              onClick={() => {
-                                void handleMarkNotificationRead(notification.id);
-                              }}
-                            >
-                              Mark read
-                            </button>
-                          )}
-                        </div>
-                      </div>
-                    );
-                  })}
-              </div>
-            )}
-          </div>
-          <div className="helper">
-            Signed in as
-            <br />
-            <strong>
-              {user?.first_name} {user?.last_name}
-            </strong>
-            <br />
-            {user?.email}
-          </div>
-          <button className="button subtle" type="button" onClick={logout}>
-            Log Out
-          </button>
-        </div>
       </aside>
       <div className="app-content">
+        <div className="app-toolbar">
+          <div className="app-toolbar-controls">
+            <div className="notifications-shell">
+              <button
+                className="button subtle notification-toggle"
+                type="button"
+                onClick={() => {
+                  void handleToggleNotifications();
+                }}
+              >
+                Notifications
+                {unreadCount > 0 && <span className="notification-count">{unreadBadgeText}</span>}
+              </button>
+              {notificationsOpen && (
+                <div className="notification-panel">
+                  <div className="notification-panel-header">
+                    <strong>Notifications</strong>
+                    <button
+                      className="button subtle"
+                      type="button"
+                      disabled={unreadCount === 0}
+                      onClick={() => {
+                        void handleMarkAllRead();
+                      }}
+                    >
+                      Mark all read
+                    </button>
+                  </div>
+                  {notificationsLoading && <div className="helper">Loading...</div>}
+                  {!notificationsLoading && notificationError && (
+                    <div className="helper">{notificationError}</div>
+                  )}
+                  {!notificationsLoading && !notificationError && notifications.length === 0 && (
+                    <div className="helper">No notifications yet.</div>
+                  )}
+                  {!notificationsLoading &&
+                    !notificationError &&
+                    notifications.map((notification) => {
+                      const href = resolveNotificationHref(notification);
+                      return (
+                        <div
+                          key={notification.id}
+                          className={`notification-item${notification.is_read ? "" : " unread"}`}
+                        >
+                          <div className="notification-item-head">
+                            <strong>{notification.title}</strong>
+                            <span className="helper">{formatNotificationTime(notification.created_at)}</span>
+                          </div>
+                          <div className="helper">{notification.body}</div>
+                          <div className="notification-item-actions">
+                            {href ? (
+                              <Link
+                                className="button subtle"
+                                to={href}
+                                onClick={() => {
+                                  void handleNotificationOpen(notification);
+                                }}
+                              >
+                                Open
+                              </Link>
+                            ) : (
+                              <span />
+                            )}
+                            {!notification.is_read && (
+                              <button
+                                className="button subtle"
+                                type="button"
+                                onClick={() => {
+                                  void handleMarkNotificationRead(notification.id);
+                                }}
+                              >
+                                Mark read
+                              </button>
+                            )}
+                          </div>
+                        </div>
+                      );
+                    })}
+                </div>
+              )}
+            </div>
+            <div className="session-block">
+              <div className="helper">
+                Signed in as
+                <br />
+                <strong>
+                  {user?.first_name} {user?.last_name}
+                </strong>
+                <br />
+                {user?.email}
+              </div>
+              <button className="button subtle" type="button" onClick={logout}>
+                Log Out
+              </button>
+            </div>
+          </div>
+        </div>
         <main className="app-main">
           <Routes>
             <Route path="/" element={<Dashboard />} />
