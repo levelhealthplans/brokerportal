@@ -41,7 +41,13 @@ else:
     UPLOADS_DIR = UPLOADS_DIR.resolve()
 NETWORK_OPTIONS_PATH = (BASE_DIR / "data" / "network_options.csv").resolve()
 NETWORK_SETTINGS_PATH = (BASE_DIR / "data" / "network_settings.json").resolve()
-HUBSPOT_SETTINGS_PATH = (BASE_DIR / "data" / "hubspot_settings.json").resolve()
+hubspot_settings_path_raw = os.getenv("HUBSPOT_SETTINGS_PATH", str(DB_PATH.with_name("hubspot_settings.json")))
+HUBSPOT_SETTINGS_PATH = Path(hubspot_settings_path_raw).expanduser()
+if not HUBSPOT_SETTINGS_PATH.is_absolute():
+    HUBSPOT_SETTINGS_PATH = (BASE_DIR / HUBSPOT_SETTINGS_PATH).resolve()
+else:
+    HUBSPOT_SETTINGS_PATH = HUBSPOT_SETTINGS_PATH.resolve()
+LEGACY_HUBSPOT_SETTINGS_PATH = (BASE_DIR / "data" / "hubspot_settings.json").resolve()
 
 SESSION_COOKIE_SECURE = os.getenv("SESSION_COOKIE_SECURE", "false").strip().lower() in {
     "1",
@@ -2072,16 +2078,33 @@ def parse_iso_datetime(value: Optional[str]) -> Optional[datetime]:
         return None
 
 
+def read_json_dict_file(path: Path) -> Dict[str, Any]:
+    if not path.exists():
+        return {}
+    try:
+        loaded = json.loads(path.read_text(encoding="utf-8"))
+        if isinstance(loaded, dict):
+            return loaded
+    except Exception:
+        return {}
+    return {}
+
+
 def read_hubspot_settings(*, include_token: bool = False) -> Dict[str, Any]:
     defaults = default_hubspot_settings()
-    raw: Dict[str, Any] = {}
-    if HUBSPOT_SETTINGS_PATH.exists():
-        try:
-            loaded = json.loads(HUBSPOT_SETTINGS_PATH.read_text(encoding="utf-8"))
-            if isinstance(loaded, dict):
-                raw = loaded
-        except Exception:
-            raw = {}
+    raw: Dict[str, Any] = read_json_dict_file(HUBSPOT_SETTINGS_PATH)
+    if (
+        not raw
+        and HUBSPOT_SETTINGS_PATH != LEGACY_HUBSPOT_SETTINGS_PATH
+        and LEGACY_HUBSPOT_SETTINGS_PATH.exists()
+    ):
+        raw = read_json_dict_file(LEGACY_HUBSPOT_SETTINGS_PATH)
+        if raw:
+            # One-time migration for environments that used the legacy file path.
+            try:
+                persist_hubspot_settings(raw)
+            except Exception:
+                pass
 
     private_token = str(raw.get("private_app_token") or defaults["private_app_token"]).strip()
     oauth_access_token = str(raw.get("oauth_access_token") or defaults["oauth_access_token"]).strip()

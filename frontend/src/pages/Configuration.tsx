@@ -423,26 +423,28 @@ export default function Configuration() {
     }
   };
 
+  const buildHubSpotSettingsPayload = () => ({
+    enabled: hubspotSettings.enabled,
+    portal_id: hubspotSettings.portal_id.trim(),
+    pipeline_id: hubspotSettings.pipeline_id.trim(),
+    default_stage_id: hubspotSettings.default_stage_id.trim(),
+    sync_quote_to_hubspot: hubspotSettings.sync_quote_to_hubspot,
+    sync_hubspot_to_quote: hubspotSettings.sync_hubspot_to_quote,
+    property_mappings: hubspotSettings.property_mappings,
+    quote_status_to_stage: hubspotSettings.quote_status_to_stage,
+    stage_to_quote_status: hubspotSettings.stage_to_quote_status,
+    oauth_redirect_uri:
+      (hubspotSettings.oauth_redirect_uri || "").trim() || undefined,
+    private_app_token: hubspotTokenInput.trim()
+      ? hubspotTokenInput.trim()
+      : undefined,
+  });
+
   const handleSaveHubSpotSettings = async () => {
     setBusy(true);
     setError(null);
     try {
-      const next = await updateHubSpotSettings({
-        enabled: hubspotSettings.enabled,
-        portal_id: hubspotSettings.portal_id.trim(),
-        pipeline_id: hubspotSettings.pipeline_id.trim(),
-        default_stage_id: hubspotSettings.default_stage_id.trim(),
-        sync_quote_to_hubspot: hubspotSettings.sync_quote_to_hubspot,
-        sync_hubspot_to_quote: hubspotSettings.sync_hubspot_to_quote,
-        property_mappings: hubspotSettings.property_mappings,
-        quote_status_to_stage: hubspotSettings.quote_status_to_stage,
-        stage_to_quote_status: hubspotSettings.stage_to_quote_status,
-        oauth_redirect_uri:
-          (hubspotSettings.oauth_redirect_uri || "").trim() || undefined,
-        private_app_token: hubspotTokenInput.trim()
-          ? hubspotTokenInput.trim()
-          : undefined,
-      });
+      const next = await updateHubSpotSettings(buildHubSpotSettingsPayload());
       setHubspotSettings(next);
       setHubspotTokenInput("");
       setStatusMessage("HubSpot settings saved.");
@@ -457,8 +459,11 @@ export default function Configuration() {
     setBusy(true);
     setError(null);
     try {
+      const saved = await updateHubSpotSettings(buildHubSpotSettingsPayload());
+      setHubspotSettings(saved);
+      setHubspotTokenInput("");
       const redirectUri =
-        (hubspotSettings.oauth_redirect_uri || "").trim() ||
+        (saved.oauth_redirect_uri || "").trim() ||
         `${window.location.origin}/api/integrations/hubspot/oauth/callback`;
       const result = await startHubSpotOAuth(redirectUri);
       const popup = window.open(
