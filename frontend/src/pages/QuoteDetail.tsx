@@ -50,6 +50,7 @@ export default function QuoteDetail() {
     {},
   );
   const [editGroupOpen, setEditGroupOpen] = useState(false);
+  const [editBrokerOpen, setEditBrokerOpen] = useState(false);
   const [groupDraft, setGroupDraft] = useState({
     company: "",
     employer_street: "",
@@ -63,6 +64,15 @@ export default function QuoteDetail() {
     current_enrolled: "",
     current_eligible: "",
     current_insurance_type: "",
+  });
+  const [brokerDraft, setBrokerDraft] = useState({
+    broker_first_name: "",
+    broker_last_name: "",
+    broker_email: "",
+    broker_phone: "",
+    broker_org: "",
+    broker_fee_pepm: "",
+    agent_of_record: false,
   });
   const [stageDraft, setStageDraft] = useState("Draft");
   const [manualNetworkDraft, setManualNetworkDraft] = useState("");
@@ -249,8 +259,26 @@ export default function QuoteDetail() {
     });
   };
 
+  const resetBrokerDraft = (quoteData?: QuoteDetailType["quote"]) => {
+    const quote = quoteData || data?.quote;
+    if (!quote) return;
+    setBrokerDraft({
+      broker_first_name: quote.broker_first_name || "",
+      broker_last_name: quote.broker_last_name || "",
+      broker_email: quote.broker_email || "",
+      broker_phone: quote.broker_phone || "",
+      broker_org: quote.broker_org || "",
+      broker_fee_pepm:
+        quote.broker_fee_pepm !== undefined && quote.broker_fee_pepm !== null
+          ? String(quote.broker_fee_pepm)
+          : "",
+      agent_of_record: Boolean(quote.agent_of_record),
+    });
+  };
+
   useEffect(() => {
     resetGroupDraft(data?.quote);
+    resetBrokerDraft(data?.quote);
     if (data?.quote?.status) {
       setStageDraft(
         data.quote.status === "Submitted"
@@ -648,6 +676,10 @@ export default function QuoteDetail() {
     setGroupDraft((prev) => ({ ...prev, [field]: value }));
   };
 
+  const handleBrokerDraftChange = (field: string, value: string | boolean) => {
+    setBrokerDraft((prev) => ({ ...prev, [field]: value }));
+  };
+
   const toNumberOrUndefined = (value: string) => {
     if (value === "") return undefined;
     const parsed = Number(value);
@@ -723,6 +755,34 @@ export default function QuoteDetail() {
       setStatusMessage(
         `Synced from HubSpot. Ticket stage: ${result.ticket_stage || "n/a"} · Quote status: ${result.quote_status}`,
       );
+      refresh();
+    } catch (err: any) {
+      setError(err.message);
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  const handleBrokerSave = async () => {
+    setBusy(true);
+    setError(null);
+    try {
+      const fee = toNumberOrUndefined(brokerDraft.broker_fee_pepm);
+      if (fee === undefined) {
+        setError("Broker fee must be a valid number.");
+        return;
+      }
+      await updateQuote(quoteId, {
+        broker_first_name: brokerDraft.broker_first_name.trim() || null,
+        broker_last_name: brokerDraft.broker_last_name.trim() || null,
+        broker_email: brokerDraft.broker_email.trim() || null,
+        broker_phone: brokerDraft.broker_phone.trim() || null,
+        broker_org: brokerDraft.broker_org.trim() || null,
+        broker_fee_pepm: fee,
+        agent_of_record: brokerDraft.agent_of_record,
+      });
+      setStatusMessage("Broker info updated.");
+      setEditBrokerOpen(false);
       refresh();
     } catch (err: any) {
       setError(err.message);
@@ -971,20 +1031,131 @@ export default function QuoteDetail() {
       )}
 
       <h3 style={{ marginTop: 20 }}>Broker Information</h3>
-      <div className="kv">
-        <strong>Broker</strong>
-        <span>
-          {quote.broker_first_name || "—"} {quote.broker_last_name || ""}
-        </span>
-        <strong>Email</strong>
-        <span>{quote.broker_email}</span>
-        <strong>Phone</strong>
-        <span>{quote.broker_phone}</span>
-        <strong>Broker Fee</strong>
-        <span>${quote.broker_fee_pepm.toFixed(2)} PEPM</span>
-        <strong>Agent of Record</strong>
-        <span>{quote.agent_of_record ? "Yes" : "No"}</span>
-      </div>
+      {role === "admin" && (
+        <div className="inline-actions" style={{ marginBottom: 10 }}>
+          <button
+            className="button ghost"
+            type="button"
+            onClick={() => {
+              setEditBrokerOpen((prev) => {
+                const next = !prev;
+                if (!next) resetBrokerDraft();
+                return next;
+              });
+            }}
+            disabled={busy}
+          >
+            {editBrokerOpen ? "Cancel" : "Edit Broker Info"}
+          </button>
+        </div>
+      )}
+      {editBrokerOpen ? (
+        <div className="edit-grid">
+          <label>
+            Broker First Name
+            <input
+              value={brokerDraft.broker_first_name}
+              onChange={(e) =>
+                handleBrokerDraftChange("broker_first_name", e.target.value)
+              }
+            />
+          </label>
+          <label>
+            Broker Last Name
+            <input
+              value={brokerDraft.broker_last_name}
+              onChange={(e) =>
+                handleBrokerDraftChange("broker_last_name", e.target.value)
+              }
+            />
+          </label>
+          <label>
+            Broker Email
+            <input
+              type="email"
+              value={brokerDraft.broker_email}
+              onChange={(e) =>
+                handleBrokerDraftChange("broker_email", e.target.value)
+              }
+            />
+          </label>
+          <label>
+            Broker Phone
+            <input
+              value={brokerDraft.broker_phone}
+              onChange={(e) =>
+                handleBrokerDraftChange("broker_phone", e.target.value)
+              }
+            />
+          </label>
+          <label>
+            Broker Organization
+            <input
+              value={brokerDraft.broker_org}
+              onChange={(e) =>
+                handleBrokerDraftChange("broker_org", e.target.value)
+              }
+            />
+          </label>
+          <label>
+            Broker Fee (PEPM)
+            <input
+              type="number"
+              step="0.01"
+              value={brokerDraft.broker_fee_pepm}
+              onChange={(e) =>
+                handleBrokerDraftChange("broker_fee_pepm", e.target.value)
+              }
+            />
+          </label>
+          <label>
+            Agent of Record
+            <input
+              type="checkbox"
+              checked={brokerDraft.agent_of_record}
+              onChange={(e) =>
+                handleBrokerDraftChange("agent_of_record", e.target.checked)
+              }
+            />
+          </label>
+          <div className="inline-actions">
+            <button
+              className="button"
+              onClick={handleBrokerSave}
+              disabled={busy}
+            >
+              Save Broker Info
+            </button>
+            <button
+              className="button ghost"
+              type="button"
+              onClick={() => {
+                resetBrokerDraft();
+                setEditBrokerOpen(false);
+              }}
+            >
+              Cancel
+            </button>
+          </div>
+        </div>
+      ) : (
+        <div className="kv">
+          <strong>Broker</strong>
+          <span>
+            {quote.broker_first_name || "—"} {quote.broker_last_name || ""}
+          </span>
+          <strong>Email</strong>
+          <span>{quote.broker_email || "—"}</span>
+          <strong>Phone</strong>
+          <span>{quote.broker_phone || "—"}</span>
+          <strong>Organization</strong>
+          <span>{quote.broker_org || "—"}</span>
+          <strong>Broker Fee</strong>
+          <span>${quote.broker_fee_pepm.toFixed(2)} PEPM</span>
+          <strong>Agent of Record</strong>
+          <span>{quote.agent_of_record ? "Yes" : "No"}</span>
+        </div>
+      )}
 
       <h3 style={{ marginTop: 20 }}>High Cost Claimants</h3>
       <div className="notice">

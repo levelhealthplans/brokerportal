@@ -1,9 +1,11 @@
 import { useEffect, useState } from "react";
-import { Link, useParams } from "react-router-dom";
+import { Link, useNavigate, useParams } from "react-router-dom";
 import {
+  deleteImplementation,
   deleteInstallationDocument,
   getInstallation,
   getUsers,
+  regressImplementationToQuote,
   uploadInstallationDocument,
   InstallationDetail,
   updateTask,
@@ -13,6 +15,7 @@ import { useAutoDismissMessage } from "../hooks/useAutoDismissMessage";
 
 export default function ImplementationDetail() {
   const { id } = useParams();
+  const navigate = useNavigate();
   const installationId = id || "";
   const [data, setData] = useState<InstallationDetail | null>(null);
   const [error, setError] = useState<string | null>(null);
@@ -119,6 +122,42 @@ export default function ImplementationDetail() {
       await deleteInstallationDocument(installationId, documentId);
       setStatusMessage("Document deleted.");
       refresh();
+    } catch (err: any) {
+      setError(err.message);
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  const handleDeleteImplementation = async () => {
+    const confirmed = window.confirm(
+      "Delete this implementation and all related tasks/documents? This cannot be undone."
+    );
+    if (!confirmed) return;
+    setBusy(true);
+    setError(null);
+    try {
+      await deleteImplementation(installationId);
+      setStatusMessage("Implementation deleted.");
+      navigate("/implementations");
+    } catch (err: any) {
+      setError(err.message);
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  const handleRegressToQuote = async () => {
+    const confirmed = window.confirm(
+      "Regress this implementation back to quote stage? This removes implementation tasks/documents."
+    );
+    if (!confirmed) return;
+    setBusy(true);
+    setError(null);
+    try {
+      const result = await regressImplementationToQuote(installationId);
+      setStatusMessage("Implementation regressed back to quote.");
+      navigate(`/quotes/${result.quote_id}`);
     } catch (err: any) {
       setError(err.message);
     } finally {
@@ -266,9 +305,26 @@ export default function ImplementationDetail() {
       </section>
 
       <div className="inline-actions">
-        <button className="button ghost" disabled>
-          Escalate (Placeholder)
-        </button>
+        {isAdmin && (
+          <>
+            <button
+              className="button secondary"
+              type="button"
+              onClick={handleRegressToQuote}
+              disabled={busy}
+            >
+              Regress to Quote
+            </button>
+            <button
+              className="button"
+              type="button"
+              onClick={handleDeleteImplementation}
+              disabled={busy}
+            >
+              Delete Implementation
+            </button>
+          </>
+        )}
         <Link className="button ghost" to="/implementations">
           Back to Implementations
         </Link>

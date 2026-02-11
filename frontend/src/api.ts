@@ -183,6 +183,13 @@ export type InstallationDetail = {
   documents: InstallationDocument[];
 };
 
+export type InstallationRegressResponse = {
+  status: string;
+  installation_id: string;
+  quote_id: string;
+  quote_status: string;
+};
+
 export type Organization = {
   id: string;
   name: string;
@@ -713,6 +720,19 @@ export function assignOrganizationQuotes(id: string, quoteIds: string[]) {
 
 export function getInstallation(id: string, access?: AccessParams) {
   return request<InstallationDetail>(withAccessParams(`/installations/${id}`, access));
+}
+
+export function deleteImplementation(id: string) {
+  return request<{ status: string; installation_id: string; quote_id: string }>(
+    `/installations/${id}`,
+    { method: "DELETE" }
+  );
+}
+
+export function regressImplementationToQuote(id: string) {
+  return request<InstallationRegressResponse>(`/installations/${id}/regress-to-quote`, {
+    method: "POST",
+  });
 }
 
 export function getTasks(access?: AccessParams) {

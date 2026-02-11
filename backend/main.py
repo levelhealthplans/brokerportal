@@ -1201,6 +1201,13 @@ class InstallationDocumentOut(BaseModel):
     created_at: str
 
 
+class InstallationRegressOut(BaseModel):
+    status: str
+    installation_id: str
+    quote_id: str
+    quote_status: str
+
+
 class OrganizationIn(BaseModel):
     name: str
     type: str
@@ -1738,6 +1745,45 @@ def remove_upload_file(path_value: Optional[str]) -> None:
         except OSError:
             break
         parent = parent.parent
+
+
+def delete_installation_with_dependencies(
+    conn: sqlite3.Connection,
+    installation_id: str,
+) -> Dict[str, Any]:
+    cur = conn.cursor()
+    cur.execute("SELECT * FROM Installation WHERE id = ?", (installation_id,))
+    installation = cur.fetchone()
+    if not installation:
+        raise HTTPException(status_code=404, detail="Installation not found")
+
+    quote_id = str(installation["quote_id"] or "").strip()
+    files_to_remove: List[str] = []
+
+    cur.execute(
+        "SELECT path FROM InstallationDocument WHERE installation_id = ?",
+        (installation_id,),
+    )
+    files_to_remove.extend(
+        [row["path"] for row in cur.fetchall() if row["path"]]
+    )
+
+    cur.execute(
+        "SELECT COUNT(*) AS cnt FROM Task WHERE installation_id = ?",
+        (installation_id,),
+    )
+    deleted_task_count = int(cur.fetchone()["cnt"] or 0)
+
+    cur.execute("DELETE FROM InstallationDocument WHERE installation_id = ?", (installation_id,))
+    cur.execute("DELETE FROM Task WHERE installation_id = ?", (installation_id,))
+    cur.execute("DELETE FROM Installation WHERE id = ?", (installation_id,))
+
+    return {
+        "installation_id": installation_id,
+        "quote_id": quote_id,
+        "files_to_remove": files_to_remove,
+        "deleted_task_count": deleted_task_count,
+    }
 
 
 def delete_quote_with_dependencies(conn: sqlite3.Connection, quote_id: str) -> Dict[str, Any]:
@@ -5008,11 +5054,28 @@ def list_tasks(request: Request, role: Optional[str] = None, email: Optional[str
 
 
 @app.patch("/api/quotes/{quote_id}", response_model=QuoteOut)
-def update_quote(quote_id: str, payload: QuoteUpdate) -> QuoteOut:
+def update_quote(quote_id: str, payload: QuoteUpdate, request: Request) -> QuoteOut:
     with get_db() as conn:
         quote = fetch_quote(conn, quote_id)
         data = dict(quote)
         updates = payload.dict(exclude_unset=True)
+        broker_info_fields = {
+            "broker_first_name",
+            "broker_last_name",
+            "broker_email",
+            "broker_phone",
+            "agent_of_record",
+            "broker_org",
+            "broker_fee_pepm",
+        }
+        if any(field in updates for field in broker_info_fields):
+            session_user = get_session_user(conn, request)
+            role = str(session_user["role"] or "").strip().lower() if session_user else ""
+            if role != "admin":
+                raise HTTPException(
+                    status_code=403,
+                    detail="Only admin can edit broker information",
+                )
         if "broker_email" in updates and "broker_org" not in updates:
             domain = email_domain(updates.get("broker_email"))
             org = fetch_org_by_domain(conn, "broker", domain)
@@ -5714,6 +5777,8 @@ def convert_to_installation(
         id=installation_id,
         quote_id=quote_id,
         company=quote["company"],
+        broker_org=quote["broker_org"],
+        sponsor_domain=quote["sponsor_domain"],
         effective_date=quote["effective_date"],
         status="In Progress",
         created_at=now,
@@ -5791,6 +5856,73 @@ def get_installation_detail(
         "tasks": tasks,
         "documents": documents,
     }
+
+
+@app.delete("/api/installations/{installation_id}")
+def delete_installation(installation_id: str, request: Request) -> Dict[str, Any]:
+    with get_db() as conn:
+        require_session_role(conn, request, {"admin"})
+        cleanup = delete_installation_with_dependencies(conn, installation_id)
+        conn.commit()
+
+    for path_value in cleanup["files_to_remove"]:
+        remove_upload_file(path_value)
+    install_dir = UPLOADS_DIR / f"installation-{installation_id}"
+    try:
+        if install_dir.exists():
+            shutil.rmtree(install_dir, ignore_errors=True)
+    except Exception:
+        pass
+
+    return {
+        "status": "deleted",
+        "installation_id": installation_id,
+        "quote_id": cleanup["quote_id"],
+    }
+
+
+@app.post(
+    "/api/installations/{installation_id}/regress-to-quote",
+    response_model=InstallationRegressOut,
+)
+def regress_installation_to_quote(
+    installation_id: str,
+    request: Request,
+) -> InstallationRegressOut:
+    target_quote_status = "Quote Submitted"
+    with get_db() as conn:
+        require_session_role(conn, request, {"admin"})
+        cleanup = delete_installation_with_dependencies(conn, installation_id)
+        quote_id = cleanup["quote_id"]
+        if not quote_id:
+            raise HTTPException(status_code=400, detail="Installation is not linked to a quote")
+        fetch_quote(conn, quote_id)
+        cur = conn.cursor()
+        cur.execute(
+            """
+            UPDATE Quote
+            SET status = ?, updated_at = ?
+            WHERE id = ?
+            """,
+            (target_quote_status, now_iso(), quote_id),
+        )
+        conn.commit()
+
+    for path_value in cleanup["files_to_remove"]:
+        remove_upload_file(path_value)
+    install_dir = UPLOADS_DIR / f"installation-{installation_id}"
+    try:
+        if install_dir.exists():
+            shutil.rmtree(install_dir, ignore_errors=True)
+    except Exception:
+        pass
+
+    return InstallationRegressOut(
+        status="regressed",
+        installation_id=installation_id,
+        quote_id=quote_id,
+        quote_status=target_quote_status,
+    )
 
 
 @app.post("/api/installations/{installation_id}/tasks/{task_id}/advance", response_model=TaskOut)
