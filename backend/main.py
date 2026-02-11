@@ -1907,6 +1907,31 @@ class HubSpotSyncResponse(BaseModel):
     ticket_stage: Optional[str]
 
 
+class HubSpotBulkMismatchBucketOut(BaseModel):
+    message: str
+    count: int
+    quote_ids: List[str]
+
+
+class HubSpotBulkQuoteMismatchOut(BaseModel):
+    quote_id: str
+    company: str
+    hubspot_ticket_id: Optional[str]
+    hubspot_sync_error: str
+
+
+class HubSpotBulkResyncResponse(BaseModel):
+    status: str
+    integration_enabled: bool
+    quote_to_hubspot_sync_enabled: bool
+    total_quotes: int
+    attempted_quotes: int
+    clean_quotes: int
+    mismatch_quotes: int
+    buckets: List[HubSpotBulkMismatchBucketOut]
+    mismatches: List[HubSpotBulkQuoteMismatchOut]
+
+
 class HubSpotPipelineStageOut(BaseModel):
     id: str
     label: str
@@ -3126,6 +3151,46 @@ def sync_quote_from_hubspot(conn: sqlite3.Connection, quote_id: str) -> Dict[str
     }
 
 
+def build_hubspot_bulk_mismatch_report(
+    conn: sqlite3.Connection,
+) -> tuple[List[Dict[str, Any]], List[Dict[str, Any]], int]:
+    cur = conn.cursor()
+    cur.execute(
+        """
+        SELECT id, company, hubspot_ticket_id, hubspot_sync_error
+        FROM Quote
+        ORDER BY created_at DESC
+        """
+    )
+    rows = cur.fetchall()
+    mismatches: List[Dict[str, Any]] = []
+    bucket_map: Dict[str, List[str]] = {}
+    for row in rows:
+        sync_error = str(row["hubspot_sync_error"] or "").strip()
+        if not sync_error:
+            continue
+        quote_id = str(row["id"] or "").strip()
+        if not quote_id:
+            continue
+        mismatches.append(
+            {
+                "quote_id": quote_id,
+                "company": str(row["company"] or "").strip(),
+                "hubspot_ticket_id": (str(row["hubspot_ticket_id"] or "").strip() or None),
+                "hubspot_sync_error": sync_error,
+            }
+        )
+        bucket_map.setdefault(sync_error, []).append(quote_id)
+
+    buckets = [
+        {"message": message, "count": len(quote_ids), "quote_ids": quote_ids}
+        for message, quote_ids in bucket_map.items()
+    ]
+    buckets.sort(key=lambda row: (-row["count"], row["message"].lower()))
+    clean_quotes = max(0, len(rows) - len(mismatches))
+    return mismatches, buckets, clean_quotes
+
+
 def recompute_needs_action(conn: sqlite3.Connection, quote_id: str) -> None:
     cur = conn.cursor()
     census = latest_census_upload(conn, quote_id)
@@ -3736,6 +3801,43 @@ def sync_quote_from_hubspot_endpoint(quote_id: str, request: Request) -> HubSpot
         require_session_role(conn, request, {"admin"})
         result = sync_quote_from_hubspot(conn, quote_id)
     return HubSpotSyncResponse(status="ok", **result)
+
+
+@app.post("/api/integrations/hubspot/resync-all", response_model=HubSpotBulkResyncResponse)
+def resync_all_quotes_to_hubspot(request: Request) -> HubSpotBulkResyncResponse:
+    with get_db() as conn:
+        require_session_role(conn, request, {"admin"})
+        settings = read_hubspot_settings(include_token=True)
+        cur = conn.cursor()
+        cur.execute("SELECT id FROM Quote ORDER BY created_at DESC")
+        quote_ids = [str(row["id"] or "").strip() for row in cur.fetchall() if str(row["id"] or "").strip()]
+
+        attempted_quotes = 0
+        can_sync = bool(settings.get("enabled")) and bool(settings.get("sync_quote_to_hubspot"))
+        if can_sync:
+            for quote_id in quote_ids:
+                attempted_quotes += 1
+                try:
+                    sync_quote_to_hubspot(conn, quote_id, create_if_missing=True)
+                except Exception as exc:
+                    detail = str(exc)
+                    if isinstance(exc, HTTPException):
+                        detail = str(exc.detail)
+                    update_quote_hubspot_sync_state(conn, quote_id, sync_error=detail)
+
+        mismatches, buckets, clean_quotes = build_hubspot_bulk_mismatch_report(conn)
+        status = "ok" if can_sync else "blocked"
+        return HubSpotBulkResyncResponse(
+            status=status,
+            integration_enabled=bool(settings.get("enabled")),
+            quote_to_hubspot_sync_enabled=bool(settings.get("sync_quote_to_hubspot")),
+            total_quotes=len(quote_ids),
+            attempted_quotes=attempted_quotes,
+            clean_quotes=clean_quotes,
+            mismatch_quotes=len(mismatches),
+            buckets=[HubSpotBulkMismatchBucketOut(**bucket) for bucket in buckets],
+            mismatches=[HubSpotBulkQuoteMismatchOut(**mismatch) for mismatch in mismatches],
+        )
 
 
 @app.get("/api/quotes", response_model=List[QuoteListOut])

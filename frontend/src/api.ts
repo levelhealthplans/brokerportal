@@ -306,6 +306,31 @@ export type HubSpotSyncResponse = {
   ticket_stage?: string | null;
 };
 
+export type HubSpotBulkMismatchBucket = {
+  message: string;
+  count: number;
+  quote_ids: string[];
+};
+
+export type HubSpotBulkQuoteMismatch = {
+  quote_id: string;
+  company: string;
+  hubspot_ticket_id?: string | null;
+  hubspot_sync_error: string;
+};
+
+export type HubSpotBulkResyncResponse = {
+  status: string;
+  integration_enabled: boolean;
+  quote_to_hubspot_sync_enabled: boolean;
+  total_quotes: number;
+  attempted_quotes: number;
+  clean_quotes: number;
+  mismatch_quotes: number;
+  buckets: HubSpotBulkMismatchBucket[];
+  mismatches: HubSpotBulkQuoteMismatch[];
+};
+
 export type CleanupUnassignedResult = {
   status: string;
   deleted_quote_count: number;
@@ -317,6 +342,7 @@ export type CleanupUnassignedResult = {
 
 const API_BASE = (import.meta.env.VITE_API_BASE || "/api").replace(/\/+$/, "");
 const REQUEST_TIMEOUT_MS = 15000;
+type RequestOptions = RequestInit & { timeoutMs?: number };
 
 function parseErrorMessage(raw: string): string {
   const text = (raw || "").trim();
@@ -335,14 +361,16 @@ function parseErrorMessage(raw: string): string {
   return text;
 }
 
-async function request<T>(path: string, options?: RequestInit): Promise<T> {
+async function request<T>(path: string, options?: RequestOptions): Promise<T> {
+  const timeoutMs = options?.timeoutMs ?? REQUEST_TIMEOUT_MS;
+  const { timeoutMs: _timeoutMs, ...requestOptions } = options || {};
   const controller = new AbortController();
-  const timeout = window.setTimeout(() => controller.abort(), REQUEST_TIMEOUT_MS);
+  const timeout = window.setTimeout(() => controller.abort(), timeoutMs);
   let res: Response;
   try {
     res = await fetch(`${API_BASE}${path}`, {
       credentials: "include",
-      ...options,
+      ...requestOptions,
       signal: controller.signal,
     });
   } catch (err: any) {
@@ -611,6 +639,13 @@ export function getHubSpotTicketProperties() {
 export function syncQuoteFromHubSpot(quoteId: string) {
   return request<HubSpotSyncResponse>(`/integrations/hubspot/sync-quote/${quoteId}`, {
     method: "POST",
+  });
+}
+
+export function bulkResyncHubSpotQuotes() {
+  return request<HubSpotBulkResyncResponse>("/integrations/hubspot/resync-all", {
+    method: "POST",
+    timeoutMs: 120000,
   });
 }
 

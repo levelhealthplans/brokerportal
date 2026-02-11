@@ -1,5 +1,6 @@
 import { type SyntheticEvent, useEffect, useMemo, useState } from "react";
 import {
+  bulkResyncHubSpotQuotes,
   cleanupUnassignedRecords,
   createNetworkMapping,
   createNetworkOption,
@@ -12,6 +13,7 @@ import {
   getNetworkMappings,
   getNetworkOptions,
   getNetworkSettings,
+  HubSpotBulkResyncResponse,
   HubSpotPipeline,
   HubSpotSettings,
   HubSpotTicketProperty,
@@ -173,6 +175,8 @@ export default function Configuration() {
   const [hubspotTestMessage, setHubspotTestMessage] = useState<string | null>(
     null,
   );
+  const [hubspotBulkReport, setHubspotBulkReport] =
+    useState<HubSpotBulkResyncResponse | null>(null);
   const [hubspotPanelState, setHubspotPanelState] = useState<HubspotPanelState>(
     () => readHubspotPanelState(),
   );
@@ -504,6 +508,32 @@ export default function Configuration() {
     } catch (err: any) {
       setError(err.message);
       setHubspotTestMessage(null);
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  const handleBulkResyncHubSpot = async () => {
+    const confirmed = window.confirm(
+      "Re-sync all quotes to HubSpot and generate a mismatch report?",
+    );
+    if (!confirmed) return;
+    setBusy(true);
+    setError(null);
+    try {
+      const report = await bulkResyncHubSpotQuotes();
+      setHubspotBulkReport(report);
+      if (report.status === "blocked") {
+        setStatusMessage(
+          `Bulk re-sync blocked. Integration enabled: ${report.integration_enabled ? "yes" : "no"} · Quote -> HubSpot sync enabled: ${report.quote_to_hubspot_sync_enabled ? "yes" : "no"}.`,
+        );
+      } else {
+        setStatusMessage(
+          `Bulk re-sync finished. ${report.clean_quotes}/${report.total_quotes} clean, ${report.mismatch_quotes} mismatches.`,
+        );
+      }
+    } catch (err: any) {
+      setError(err.message);
     } finally {
       setBusy(false);
     }
@@ -1690,11 +1720,53 @@ export default function Configuration() {
           >
             Test Connection
           </button>
+          <button
+            className="button ghost"
+            type="button"
+            onClick={handleBulkResyncHubSpot}
+            disabled={busy}
+          >
+            Re-sync All Quotes + Report
+          </button>
         </div>
 
         {hubspotTestMessage && (
           <div className="helper" style={{ marginTop: 8 }}>
             {hubspotTestMessage}
+          </div>
+        )}
+        {hubspotBulkReport && (
+          <div style={{ marginTop: 12 }}>
+            <div className="helper" style={{ marginBottom: 8 }}>
+              Last bulk run: status {hubspotBulkReport.status} · attempted{" "}
+              {hubspotBulkReport.attempted_quotes}/{hubspotBulkReport.total_quotes}
+              {" · "}clean {hubspotBulkReport.clean_quotes} · mismatches{" "}
+              {hubspotBulkReport.mismatch_quotes}
+            </div>
+            {hubspotBulkReport.buckets.length > 0 ? (
+              <div className="table-scroll">
+                <table className="table slim">
+                  <thead>
+                    <tr>
+                      <th>Mismatch</th>
+                      <th>Count</th>
+                      <th>Quote IDs</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {hubspotBulkReport.buckets.map((bucket) => (
+                      <tr key={bucket.message}>
+                        <td>{bucket.message}</td>
+                        <td>{bucket.count}</td>
+                        <td>{bucket.quote_ids.join(", ")}</td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
+            ) : (
+              <div className="helper">No HubSpot mismatches found.</div>
+            )}
           </div>
         )}
       </section>
