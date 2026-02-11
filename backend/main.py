@@ -3,6 +3,7 @@ from __future__ import annotations
 import csv
 import hashlib
 import json
+import mimetypes
 import os
 import re
 import secrets
@@ -124,6 +125,7 @@ HUBSPOT_API_BASE = "https://api.hubapi.com"
 HUBSPOT_OAUTH_AUTHORIZE_URL = "https://app.hubspot.com/oauth/authorize"
 HUBSPOT_OAUTH_TOKEN_URL = "https://api.hubapi.com/oauth/v1/token"
 HUBSPOT_OAUTH_STATE_MINUTES = 15
+HUBSPOT_FILES_FOLDER_ROOT = (os.getenv("HUBSPOT_FILES_FOLDER_ROOT", "/level-health/quote-attachments") or "").strip()
 HUBSPOT_TICKET_RESERVED_PROPERTIES = {
     "subject",
     "content",
@@ -189,6 +191,7 @@ US_STATE_ABBREVIATIONS = {
 }
 HUBSPOT_OAUTH_DEFAULT_SCOPES = (
     "oauth tickets "
+    "files "
     "crm.objects.contacts.read crm.objects.contacts.write "
     "crm.objects.companies.read crm.objects.companies.write "
     "crm.objects.deals.read crm.objects.deals.write "
@@ -196,6 +199,8 @@ HUBSPOT_OAUTH_DEFAULT_SCOPES = (
     "crm.schemas.contacts.read crm.schemas.contacts.write "
     "crm.schemas.deals.read crm.schemas.deals.write"
 )
+HUBSPOT_SYNC_LOCK_GUARD = threading.Lock()
+HUBSPOT_SYNC_LOCKS: Dict[str, threading.Lock] = {}
 
 app = FastAPI(title="Level Health Broker Portal API")
 
@@ -526,6 +531,26 @@ def init_db() -> None:
             )
             """
         )
+        cur.execute(
+            """
+            CREATE TABLE IF NOT EXISTS HubSpotTicketAttachmentSync(
+                id TEXT PRIMARY KEY,
+                upload_id TEXT,
+                quote_id TEXT,
+                ticket_id TEXT,
+                hubspot_file_id TEXT,
+                hubspot_note_id TEXT,
+                created_at TEXT,
+                updated_at TEXT
+            )
+            """
+        )
+        cur.execute(
+            """
+            CREATE UNIQUE INDEX IF NOT EXISTS idx_hubspot_attachment_sync_upload_ticket
+            ON HubSpotTicketAttachmentSync(upload_id, ticket_id)
+            """
+        )
         # Lightweight migration for new columns
         cur.execute("PRAGMA table_info(Quote)")
         quote_cols = {row["name"] for row in cur.fetchall()}
@@ -620,6 +645,15 @@ def init_db() -> None:
             cur.execute("ALTER TABLE AuthSession ADD COLUMN created_at TEXT")
         if "last_seen_at" not in session_cols:
             cur.execute("ALTER TABLE AuthSession ADD COLUMN last_seen_at TEXT")
+
+        cur.execute("PRAGMA table_info(HubSpotTicketAttachmentSync)")
+        attachment_cols = {row["name"] for row in cur.fetchall()}
+        if "hubspot_note_id" not in attachment_cols:
+            cur.execute("ALTER TABLE HubSpotTicketAttachmentSync ADD COLUMN hubspot_note_id TEXT")
+        if "created_at" not in attachment_cols:
+            cur.execute("ALTER TABLE HubSpotTicketAttachmentSync ADD COLUMN created_at TEXT")
+        if "updated_at" not in attachment_cols:
+            cur.execute("ALTER TABLE HubSpotTicketAttachmentSync ADD COLUMN updated_at TEXT")
 
         conn.commit()
 
@@ -1713,10 +1747,13 @@ def delete_quote_with_dependencies(conn: sqlite3.Connection, quote_id: str) -> D
     files_to_remove: List[str] = []
     installation_ids: List[str] = []
     deleted_task_count = 0
+    upload_ids: List[str] = []
 
-    cur.execute("SELECT path FROM Upload WHERE quote_id = ?", (quote_id,))
+    cur.execute("SELECT id, path FROM Upload WHERE quote_id = ?", (quote_id,))
+    upload_rows = cur.fetchall()
+    upload_ids = [str(row["id"] or "").strip() for row in upload_rows if str(row["id"] or "").strip()]
     files_to_remove.extend(
-        [row["path"] for row in cur.fetchall() if row["path"]]
+        [row["path"] for row in upload_rows if row["path"]]
     )
 
     cur.execute("SELECT path FROM Proposal WHERE quote_id = ?", (quote_id,))
@@ -1763,6 +1800,13 @@ def delete_quote_with_dependencies(conn: sqlite3.Connection, quote_id: str) -> D
         )
 
     cur.execute("DELETE FROM Upload WHERE quote_id = ?", (quote_id,))
+    if upload_ids:
+        placeholders = ",".join(["?"] * len(upload_ids))
+        cur.execute(
+            f"DELETE FROM HubSpotTicketAttachmentSync WHERE upload_id IN ({placeholders})",
+            upload_ids,
+        )
+    cur.execute("DELETE FROM HubSpotTicketAttachmentSync WHERE quote_id = ?", (quote_id,))
     cur.execute("DELETE FROM StandardizationRun WHERE quote_id = ?", (quote_id,))
     cur.execute("DELETE FROM AssignmentRun WHERE quote_id = ?", (quote_id,))
     cur.execute("DELETE FROM Proposal WHERE quote_id = ?", (quote_id,))
@@ -2838,6 +2882,307 @@ def hubspot_exception_message(exc: Exception) -> str:
     return str(exc)
 
 
+def get_hubspot_sync_lock(quote_id: str) -> threading.Lock:
+    key = str(quote_id or "").strip()
+    with HUBSPOT_SYNC_LOCK_GUARD:
+        lock = HUBSPOT_SYNC_LOCKS.get(key)
+        if lock is None:
+            lock = threading.Lock()
+            HUBSPOT_SYNC_LOCKS[key] = lock
+    return lock
+
+
+def find_existing_hubspot_ticket_for_quote(
+    token: str,
+    quote: Dict[str, Any],
+    settings: Dict[str, Any],
+) -> Optional[str]:
+    quote_id = str(quote.get("id") or "").strip()
+    if not quote_id:
+        return None
+    property_mappings = normalize_ticket_property_mappings(settings.get("property_mappings") or {})
+    quote_id_property = str(property_mappings.get("id") or "").strip()
+    if not quote_id_property:
+        return None
+    return hubspot_search_object_id(
+        token,
+        "tickets",
+        quote_id_property,
+        quote_id,
+        properties=[quote_id_property, "subject", "hs_pipeline_stage"],
+    )
+
+
+def build_multipart_form_data(
+    *,
+    fields: Dict[str, str],
+    file_field_name: str,
+    file_name: str,
+    file_bytes: bytes,
+    file_content_type: str,
+) -> tuple[bytes, str]:
+    boundary = f"----levelhealth-{uuid.uuid4().hex}"
+    chunks: List[bytes] = []
+    for key, value in fields.items():
+        chunks.extend(
+            [
+                f"--{boundary}\r\n".encode("utf-8"),
+                f'Content-Disposition: form-data; name="{key}"\r\n\r\n'.encode("utf-8"),
+                str(value or "").encode("utf-8"),
+                b"\r\n",
+            ]
+        )
+    safe_name = (file_name or "upload.bin").replace('"', "")
+    chunks.extend(
+        [
+            f"--{boundary}\r\n".encode("utf-8"),
+            (
+                f'Content-Disposition: form-data; name="{file_field_name}"; filename="{safe_name}"\r\n'
+            ).encode("utf-8"),
+            f"Content-Type: {file_content_type or 'application/octet-stream'}\r\n\r\n".encode("utf-8"),
+            file_bytes,
+            b"\r\n",
+            f"--{boundary}--\r\n".encode("utf-8"),
+        ]
+    )
+    return b"".join(chunks), boundary
+
+
+def upload_file_to_hubspot(
+    token: str,
+    *,
+    quote_id: str,
+    source_path: Path,
+    source_filename: str,
+) -> str:
+    file_path = Path(source_path)
+    if not file_path.exists() or not file_path.is_file():
+        raise HTTPException(status_code=400, detail=f"Attachment file not found: {source_filename}")
+
+    folder_root = HUBSPOT_FILES_FOLDER_ROOT or "/level-health/quote-attachments"
+    folder_root = "/" + folder_root.strip("/")
+    folder_path = f"{folder_root}/{quote_id}".replace("//", "/")
+    options = json.dumps({"access": "PRIVATE"})
+
+    with file_path.open("rb") as fh:
+        file_bytes = fh.read()
+    content_type = mimetypes.guess_type(source_filename)[0] or "application/octet-stream"
+    body, boundary = build_multipart_form_data(
+        fields={
+            "fileName": source_filename,
+            "folderPath": folder_path,
+            "options": options,
+        },
+        file_field_name="file",
+        file_name=source_filename,
+        file_bytes=file_bytes,
+        file_content_type=content_type,
+    )
+
+    req = urlrequest.Request(
+        f"{HUBSPOT_API_BASE}/files/v3/files",
+        data=body,
+        headers={
+            "Authorization": f"Bearer {token}",
+            "Content-Type": f"multipart/form-data; boundary={boundary}",
+        },
+        method="POST",
+    )
+    try:
+        with urlrequest.urlopen(req, timeout=30) as resp:
+            raw = resp.read().decode("utf-8").strip()
+            parsed = json.loads(raw) if raw else {}
+            if not isinstance(parsed, dict):
+                raise HTTPException(status_code=502, detail="Invalid HubSpot file upload response")
+            file_id = str(parsed.get("id") or "").strip()
+            if not file_id:
+                raise HTTPException(status_code=502, detail="HubSpot file upload returned no file id")
+            return file_id
+    except urlerror.HTTPError as exc:
+        detail = ""
+        try:
+            detail = exc.read().decode("utf-8")
+        except Exception:
+            detail = str(exc)
+        raise HTTPException(status_code=502, detail=f"HubSpot file upload error ({exc.code}): {detail}")
+    except HTTPException:
+        raise
+    except Exception as exc:
+        raise HTTPException(status_code=502, detail=f"HubSpot file upload request failed: {exc}")
+
+
+def associate_hubspot_note_to_ticket(token: str, *, note_id: str, ticket_id: str) -> None:
+    candidates = [
+        f"/crm/v3/objects/notes/{note_id}/associations/tickets/{ticket_id}/note_to_ticket",
+        f"/crm/v3/objects/notes/{note_id}/associations/ticket/{ticket_id}/note_to_ticket",
+    ]
+    last_exc: Optional[Exception] = None
+    for path in candidates:
+        try:
+            hubspot_api_request(token, "PUT", path)
+            return
+        except Exception as exc:
+            last_exc = exc
+    if last_exc is not None:
+        raise last_exc
+
+
+def create_hubspot_note_with_attachment(
+    token: str,
+    *,
+    ticket_id: str,
+    file_id: str,
+    filename: str,
+    quote_id: str,
+) -> str:
+    note_body = f"Level Health attachment synced from quote {quote_id}: {filename}"
+    note = hubspot_api_request(
+        token,
+        "POST",
+        "/crm/v3/objects/notes",
+        body={
+            "properties": {
+                "hs_timestamp": str(int(datetime.utcnow().timestamp() * 1000)),
+                "hs_note_body": note_body,
+                "hs_attachment_ids": str(file_id),
+            }
+        },
+    )
+    note_id = str(note.get("id") or "").strip()
+    if not note_id:
+        raise HTTPException(status_code=502, detail="HubSpot note create returned no id")
+    associate_hubspot_note_to_ticket(token, note_id=note_id, ticket_id=ticket_id)
+    return note_id
+
+
+def get_synced_upload_ids_for_ticket(
+    conn: sqlite3.Connection,
+    *,
+    quote_id: str,
+    ticket_id: str,
+) -> set[str]:
+    cur = conn.cursor()
+    cur.execute(
+        """
+        SELECT upload_id
+        FROM HubSpotTicketAttachmentSync
+        WHERE quote_id = ? AND ticket_id = ?
+        """,
+        (quote_id, ticket_id),
+    )
+    return {
+        str(row["upload_id"] or "").strip()
+        for row in cur.fetchall()
+        if str(row["upload_id"] or "").strip()
+    }
+
+
+def record_hubspot_attachment_sync(
+    conn: sqlite3.Connection,
+    *,
+    upload_id: str,
+    quote_id: str,
+    ticket_id: str,
+    hubspot_file_id: str,
+    hubspot_note_id: str,
+) -> None:
+    now = now_iso()
+    cur = conn.cursor()
+    cur.execute(
+        """
+        INSERT INTO HubSpotTicketAttachmentSync (
+            id, upload_id, quote_id, ticket_id, hubspot_file_id, hubspot_note_id, created_at, updated_at
+        )
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+        ON CONFLICT(upload_id, ticket_id) DO UPDATE SET
+            hubspot_file_id = excluded.hubspot_file_id,
+            hubspot_note_id = excluded.hubspot_note_id,
+            updated_at = excluded.updated_at
+        """,
+        (
+            str(uuid.uuid4()),
+            upload_id,
+            quote_id,
+            ticket_id,
+            hubspot_file_id,
+            hubspot_note_id,
+            now,
+            now,
+        ),
+    )
+    conn.commit()
+
+
+def sync_hubspot_ticket_file_attachments(
+    conn: sqlite3.Connection,
+    token: str,
+    *,
+    quote_id: str,
+    ticket_id: str,
+) -> Optional[str]:
+    quote_key = str(quote_id or "").strip()
+    ticket_key = str(ticket_id or "").strip()
+    if not quote_key or not ticket_key:
+        return None
+    cur = conn.cursor()
+    cur.execute(
+        """
+        SELECT id, type, filename, path, created_at
+        FROM Upload
+        WHERE quote_id = ?
+        ORDER BY created_at ASC
+        """,
+        (quote_key,),
+    )
+    rows = cur.fetchall()
+    if not rows:
+        return None
+
+    synced_upload_ids = get_synced_upload_ids_for_ticket(conn, quote_id=quote_key, ticket_id=ticket_key)
+    warnings: List[str] = []
+    for row in rows:
+        upload_id = str(row["id"] or "").strip()
+        filename = str(row["filename"] or "").strip() or f"{str(row['type'] or '').strip()}.bin"
+        source_path_text = str(row["path"] or "").strip()
+        if not upload_id or upload_id in synced_upload_ids:
+            continue
+        if not source_path_text:
+            warnings.append(f"Attachment sync skipped ({filename}): missing local path")
+            continue
+        try:
+            hubspot_file_id = upload_file_to_hubspot(
+                token,
+                quote_id=quote_key,
+                source_path=Path(source_path_text),
+                source_filename=filename,
+            )
+            hubspot_note_id = create_hubspot_note_with_attachment(
+                token,
+                ticket_id=ticket_key,
+                file_id=hubspot_file_id,
+                filename=filename,
+                quote_id=quote_key,
+            )
+            record_hubspot_attachment_sync(
+                conn,
+                upload_id=upload_id,
+                quote_id=quote_key,
+                ticket_id=ticket_key,
+                hubspot_file_id=hubspot_file_id,
+                hubspot_note_id=hubspot_note_id,
+            )
+        except Exception as exc:
+            warnings.append(f"Attachment sync failed ({filename}): {hubspot_exception_message(exc)}")
+            message = hubspot_exception_message(exc).lower()
+            if "(403)" in message or "scope" in message or "forbidden" in message:
+                break
+    deduped: List[str] = []
+    for warning in warnings:
+        if warning not in deduped:
+            deduped.append(warning)
+    return " | ".join(deduped) if deduped else None
+
+
 def is_hubspot_conflict_error(exc: Exception) -> bool:
     message = hubspot_exception_message(exc)
     return "(409)" in message or "409" in message
@@ -3094,9 +3439,11 @@ def update_quote_hubspot_sync_state(
 
 def sync_quote_to_hubspot_async(quote_id: str, *, create_if_missing: bool) -> None:
     def worker() -> None:
+        lock = get_hubspot_sync_lock(quote_id)
         try:
-            with get_db() as conn:
-                sync_quote_to_hubspot(conn, quote_id, create_if_missing=create_if_missing)
+            with lock:
+                with get_db() as conn:
+                    sync_quote_to_hubspot(conn, quote_id, create_if_missing=create_if_missing)
         except Exception:
             # Best-effort background sync; quote save should never fail because HubSpot is slow/unavailable.
             return
@@ -3123,6 +3470,16 @@ def sync_quote_to_hubspot(conn: sqlite3.Connection, quote_id: str, *, create_if_
     quote = build_quote_hubspot_context(conn, dict(quote_row))
     properties = build_hubspot_ticket_properties(quote, settings)
     ticket_id = (quote.get("hubspot_ticket_id") or "").strip()
+    if not ticket_id:
+        try:
+            ticket_id = str(find_existing_hubspot_ticket_for_quote(token, quote, settings) or "").strip()
+        except Exception as exc:
+            update_quote_hubspot_sync_state(
+                conn,
+                quote_id,
+                sync_error=f"HubSpot ticket lookup failed: {hubspot_exception_message(exc)}",
+            )
+            return
     if not ticket_id and not create_if_missing:
         return
 
@@ -3134,13 +3491,19 @@ def sync_quote_to_hubspot(conn: sqlite3.Connection, quote_id: str, *, create_if_
                 properties=properties,
             )
             association_warning = sync_hubspot_ticket_associations(conn, token, quote, ticket_id)
+            attachment_warning = sync_hubspot_ticket_file_attachments(
+                conn,
+                token,
+                quote_id=quote_id,
+                ticket_id=ticket_id,
+            )
             ticket_url = build_hubspot_ticket_url(settings["portal_id"], ticket_id)
             update_quote_hubspot_sync_state(
                 conn,
                 quote_id,
                 ticket_id=ticket_id,
                 ticket_url=ticket_url,
-                sync_error=combine_warnings(property_warning, association_warning),
+                sync_error=combine_warnings(property_warning, association_warning, attachment_warning),
             )
             return
 
@@ -3159,15 +3522,22 @@ def sync_quote_to_hubspot(conn: sqlite3.Connection, quote_id: str, *, create_if_
         )
         new_ticket_id = str(created.get("id") or "").strip()
         association_warning = None
+        attachment_warning = None
         if new_ticket_id:
             association_warning = sync_hubspot_ticket_associations(conn, token, quote, new_ticket_id)
+            attachment_warning = sync_hubspot_ticket_file_attachments(
+                conn,
+                token,
+                quote_id=quote_id,
+                ticket_id=new_ticket_id,
+            )
         ticket_url = build_hubspot_ticket_url(settings["portal_id"], new_ticket_id)
         update_quote_hubspot_sync_state(
             conn,
             quote_id,
             ticket_id=new_ticket_id or None,
             ticket_url=ticket_url,
-            sync_error=combine_warnings(property_warning, association_warning),
+            sync_error=combine_warnings(property_warning, association_warning, attachment_warning),
         )
     except Exception as exc:
         detail = str(exc)
@@ -3381,6 +3751,11 @@ def save_upload(quote_id: str, upload_type: str, file: UploadFile) -> UploadOut:
                 (quote_id,),
             )
             existing = cur.fetchall()
+            existing_ids = [
+                str(row["id"] or "").strip()
+                for row in existing
+                if str(row["id"] or "").strip()
+            ]
             for row in existing:
                 try:
                     Path(row["path"]).unlink(missing_ok=True)
@@ -3390,6 +3765,12 @@ def save_upload(quote_id: str, upload_type: str, file: UploadFile) -> UploadOut:
                 "DELETE FROM Upload WHERE quote_id = ? AND type = 'census'",
                 (quote_id,),
             )
+            if existing_ids:
+                placeholders = ",".join(["?"] * len(existing_ids))
+                cur.execute(
+                    f"DELETE FROM HubSpotTicketAttachmentSync WHERE upload_id IN ({placeholders})",
+                    existing_ids,
+                )
             cur.execute(
                 "UPDATE Quote SET manual_network = NULL, updated_at = ? WHERE id = ?",
                 (now_iso(), quote_id),
@@ -4752,6 +5133,7 @@ def delete_quote_upload(quote_id: str, upload_id: str) -> Dict[str, str]:
         except Exception:
             pass
         cur.execute("DELETE FROM Upload WHERE id = ?", (upload_id,))
+        cur.execute("DELETE FROM HubSpotTicketAttachmentSync WHERE upload_id = ?", (upload_id,))
         conn.commit()
         recompute_needs_action(conn, quote_id)
         sync_quote_to_hubspot_async(quote_id, create_if_missing=False)

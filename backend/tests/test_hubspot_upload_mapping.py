@@ -202,6 +202,64 @@ class HubspotUploadMappingTests(unittest.TestCase):
         self.assertIn("hs_ticket_id", removed)
         self.assertIn("hs_primary_company", removed)
 
+    def test_find_existing_hubspot_ticket_for_quote_uses_quote_id_mapping(self) -> None:
+        quote = {"id": "quote-123"}
+        settings = {"property_mappings": {"id": "level_health_quote_id"}}
+        with patch.object(main, "hubspot_search_object_id", return_value="ticket-999") as search_mock:
+            found = main.find_existing_hubspot_ticket_for_quote("token-1", quote, settings)
+        self.assertEqual(found, "ticket-999")
+        search_mock.assert_called_once_with(
+            "token-1",
+            "tickets",
+            "level_health_quote_id",
+            "quote-123",
+            properties=["level_health_quote_id", "subject", "hs_pipeline_stage"],
+        )
+
+    def test_sync_hubspot_ticket_file_attachments_is_idempotent(self) -> None:
+        quote = self._create_quote()
+        with patch.object(main, "sync_quote_to_hubspot_async", return_value=None):
+            upload = main.upload_quote_file(
+                quote.id,
+                type="other_files",
+                file=UploadFile(filename="supporting.pdf", file=io.BytesIO(b"pdf-bytes")),
+            )
+
+        with main.get_db() as conn, patch.object(
+            main, "upload_file_to_hubspot", return_value="file-1"
+        ) as upload_mock, patch.object(
+            main, "create_hubspot_note_with_attachment", return_value="note-1"
+        ) as note_mock:
+            warning_one = main.sync_hubspot_ticket_file_attachments(
+                conn,
+                "token-1",
+                quote_id=quote.id,
+                ticket_id="ticket-1",
+            )
+            warning_two = main.sync_hubspot_ticket_file_attachments(
+                conn,
+                "token-1",
+                quote_id=quote.id,
+                ticket_id="ticket-1",
+            )
+            cur = conn.cursor()
+            cur.execute(
+                """
+                SELECT hubspot_file_id, hubspot_note_id
+                FROM HubSpotTicketAttachmentSync
+                WHERE upload_id = ? AND ticket_id = ?
+                """,
+                (upload.id, "ticket-1"),
+            )
+            row = cur.fetchone()
+
+        self.assertIsNone(warning_one)
+        self.assertIsNone(warning_two)
+        self.assertEqual(upload_mock.call_count, 1)
+        self.assertEqual(note_mock.call_count, 1)
+        self.assertEqual(row["hubspot_file_id"], "file-1")
+        self.assertEqual(row["hubspot_note_id"], "note-1")
+
     def test_upload_and_delete_trigger_hubspot_resync(self) -> None:
         quote = self._create_quote()
 
