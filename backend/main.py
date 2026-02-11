@@ -2378,7 +2378,7 @@ def build_quote_upload_hubspot_fields(conn: sqlite3.Connection, quote_id: str) -
     cur = conn.cursor()
     cur.execute(
         """
-        SELECT type, filename, created_at
+        SELECT type, filename, path, created_at
         FROM Upload
         WHERE quote_id = ?
         ORDER BY created_at DESC
@@ -2402,6 +2402,21 @@ def build_quote_upload_hubspot_fields(conn: sqlite3.Connection, quote_id: str) -
     latest_census = census_rows[0] if census_rows else None
     fields["census_latest_filename"] = str(latest_census["filename"] or "").strip() if latest_census else ""
     fields["census_latest_uploaded_at"] = str(latest_census["created_at"] or "").strip() if latest_census else ""
+    fields["upload_count"] = len(rows)
+
+    upload_lines: List[str] = []
+    for row in rows:
+        filename = str(row["filename"] or "").strip()
+        path = str(row["path"] or "").strip()
+        if not filename or not path:
+            continue
+        basename = Path(path).name.strip()
+        if not basename:
+            continue
+        encoded_name = urlparse.quote(basename)
+        link = f"{FRONTEND_BASE_URL}/uploads/{quote_id}/{encoded_name}"
+        upload_lines.append(f"{filename}: {link}")
+    fields["upload_files"] = "\n".join(upload_lines)
     return fields
 
 
@@ -2420,10 +2435,19 @@ def build_hubspot_ticket_properties(quote: Dict[str, Any], settings: Dict[str, A
     stage_id = (mapped_stage or settings.get("default_stage_id") or "").strip()
     employer_name = str(quote.get("company") or "").strip()
 
+    rendered_content = render_hubspot_template(settings["ticket_content_template"], quote)
+    upload_files = str(quote.get("upload_files") or "").strip()
+    if upload_files and "{{upload_files}}" not in settings["ticket_content_template"]:
+        rendered_content = (
+            f"{rendered_content}\n\nUploads:\n{upload_files}".strip()
+            if rendered_content
+            else f"Uploads:\n{upload_files}"
+        )
+
     properties: Dict[str, str] = {
         "subject": employer_name
         or render_hubspot_template(settings["ticket_subject_template"], quote),
-        "content": render_hubspot_template(settings["ticket_content_template"], quote),
+        "content": rendered_content,
     }
     if settings.get("pipeline_id"):
         properties["hs_pipeline"] = settings["pipeline_id"]

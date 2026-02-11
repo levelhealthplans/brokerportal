@@ -121,6 +121,10 @@ class HubspotUploadMappingTests(unittest.TestCase):
         self.assertFalse(context["other_files_uploaded"])
         self.assertEqual(context["census_latest_filename"], "members.csv")
         self.assertEqual(context["census_latest_uploaded_at"], now)
+        self.assertEqual(context["upload_count"], 2)
+        self.assertIn("members.csv:", context["upload_files"])
+        self.assertIn("sbc.pdf:", context["upload_files"])
+        self.assertIn("/uploads/", context["upload_files"])
 
     def test_build_ticket_properties_maps_upload_fields(self) -> None:
         quote_context = {
@@ -130,6 +134,7 @@ class HubspotUploadMappingTests(unittest.TestCase):
             "census_uploaded": True,
             "census_latest_filename": "members.csv",
             "sbc_uploaded": False,
+            "upload_files": "members.csv: https://portal.example/uploads/q-123/members.csv",
         }
         settings = {
             "quote_status_to_stage": {},
@@ -150,6 +155,8 @@ class HubspotUploadMappingTests(unittest.TestCase):
         self.assertEqual(properties["level_health_census_uploaded"], "true")
         self.assertEqual(properties["level_health_census_filename"], "members.csv")
         self.assertEqual(properties["level_health_sbc_uploaded"], "false")
+        self.assertIn("Uploads:", properties["content"])
+        self.assertIn("members.csv:", properties["content"])
 
     def test_build_ticket_properties_keeps_non_numeric_stage_ids(self) -> None:
         quote_context = {

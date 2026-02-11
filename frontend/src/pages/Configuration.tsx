@@ -79,6 +79,8 @@ const HUBSPOT_LOCAL_FIELD_OPTIONS = [
   { key: "aggregate_report_uploaded", label: "Aggregate Report Uploaded" },
   { key: "other_claims_data_uploaded", label: "Other Claims Data Uploaded" },
   { key: "other_files_uploaded", label: "Other Files Uploaded" },
+  { key: "upload_count", label: "Upload Count" },
+  { key: "upload_files", label: "Upload Files (Links)" },
   { key: "employer_street", label: "Employer Street Address" },
   { key: "employer_city", label: "Employer City" },
   { key: "state", label: "Employer State" },
