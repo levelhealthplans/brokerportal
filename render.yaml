@@ -2,6 +2,7 @@ services:
   - type: web
     name: level-health-backend
     runtime: python
+    healthCheckPath: /health
     buildCommand: pip install -r backend/requirements.txt
     startCommand: uvicorn backend.main:app --host 0.0.0.0 --port $PORT
     envVars:

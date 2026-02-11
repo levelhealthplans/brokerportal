@@ -4046,6 +4046,11 @@ async def startup_event() -> None:
     init_db()
 
 
+@app.get("/")
+def root() -> Dict[str, str]:
+    return {"status": "ok"}
+
+
 @app.get("/health")
 def health() -> Dict[str, str]:
     return {"status": "ok"}
