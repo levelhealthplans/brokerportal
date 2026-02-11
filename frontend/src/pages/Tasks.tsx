@@ -190,26 +190,21 @@ export default function Tasks() {
     setError(null);
     setStatusMessage(null);
     try {
-      const dueDate = (dueDateDrafts[task.id] ?? task.due_date ?? "").trim();
       const assignedUserId = (
         assignedUserDrafts[task.id] ??
         task.assigned_user_id ??
         ""
       ).trim();
-      const currentDueDate = (task.due_date ?? "").trim();
       const currentAssignedUserId = (task.assigned_user_id ?? "").trim();
       const payload: Partial<
         Pick<Task, "state" | "task_url" | "due_date" | "assigned_user_id">
       > = {};
-      if (dueDate !== currentDueDate) {
-        payload.due_date = dueDate || null;
-      }
       if (assignedUserId !== currentAssignedUserId) {
         payload.assigned_user_id = assignedUserId || null;
       }
 
       if (Object.keys(payload).length === 0) {
-        setStatusMessage("No assignment or due date changes to save.");
+        setStatusMessage("No assignment changes to save.");
         return;
       }
 
@@ -229,9 +224,42 @@ export default function Tasks() {
         [task.id]: updatedTask.assigned_user_id || "",
       }));
       setEditingTaskId(null);
-      setStatusMessage("Task assignment and due date updated.");
+      setStatusMessage("Task assignment updated.");
     } catch (err: any) {
       setError(err.message);
+    } finally {
+      setSavingTaskId(null);
+    }
+  };
+
+  const handleSaveDueDate = async (task: Task, rawDueDate: string) => {
+    const dueDate = (rawDueDate || "").trim();
+    const currentDueDate = (task.due_date || "").trim();
+    if (dueDate === currentDueDate) return;
+    setSavingTaskId(task.id);
+    setError(null);
+    setStatusMessage(null);
+    try {
+      const updatedTask = await updateTask(
+        task.installation_id,
+        task.id,
+        { due_date: dueDate || null },
+        { role, email },
+      );
+      setTasks((prev) =>
+        prev.map((row) => (row.id === task.id ? { ...row, ...updatedTask } : row)),
+      );
+      setDueDateDrafts((prev) => ({
+        ...prev,
+        [task.id]: updatedTask.due_date || "",
+      }));
+      setStatusMessage("Due date updated.");
+    } catch (err: any) {
+      setError(err.message);
+      setDueDateDrafts((prev) => ({
+        ...prev,
+        [task.id]: task.due_date || "",
+      }));
     } finally {
       setSavingTaskId(null);
     }
@@ -510,7 +538,23 @@ export default function Tasks() {
                     : "—"}
                 </td>
                 <td>
-                  <div>{formatDueDate(task.due_date)}</div>
+                  {isAdmin ? (
+                    <input
+                      type="date"
+                      value={dueDateDrafts[task.id] ?? task.due_date ?? ""}
+                      onChange={(event) => {
+                        const nextValue = event.target.value;
+                        setDueDateDrafts((prev) => ({
+                          ...prev,
+                          [task.id]: nextValue,
+                        }));
+                        void handleSaveDueDate(task, nextValue);
+                      }}
+                      disabled={savingTaskId === task.id}
+                    />
+                  ) : (
+                    <div>{formatDueDate(task.due_date)}</div>
+                  )}
                   <div className="helper">{dueDescriptor(task.due_date)}</div>
                 </td>
                 <td>
@@ -540,17 +584,6 @@ export default function Tasks() {
                             </option>
                           ))}
                         </select>
-                        <input
-                          type="date"
-                          value={dueDateDrafts[task.id] ?? ""}
-                          onChange={(event) =>
-                            setDueDateDrafts((prev) => ({
-                              ...prev,
-                              [task.id]: event.target.value,
-                            }))
-                          }
-                          disabled={savingTaskId === task.id}
-                        />
                         <button
                           className="button ghost"
                           type="button"
@@ -563,10 +596,6 @@ export default function Tasks() {
                           className="button subtle"
                           type="button"
                           onClick={() => {
-                            setDueDateDrafts((prev) => ({
-                              ...prev,
-                              [task.id]: task.due_date || "",
-                            }));
                             setAssignedUserDrafts((prev) => ({
                               ...prev,
                               [task.id]: task.assigned_user_id || "",
