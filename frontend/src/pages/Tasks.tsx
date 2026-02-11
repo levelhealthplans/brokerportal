@@ -195,15 +195,24 @@ export default function Tasks() {
         task.assigned_user_id ??
         ""
       ).trim();
-      await updateTask(
-        task.installation_id,
-        task.id,
-        {
-          due_date: dueDate || null,
-          assigned_user_id: assignedUserId || null,
-        },
-        { role, email },
-      );
+      const currentDueDate = (task.due_date ?? "").trim();
+      const currentAssignedUserId = (task.assigned_user_id ?? "").trim();
+      const payload: Partial<
+        Pick<Task, "state" | "task_url" | "due_date" | "assigned_user_id">
+      > = {};
+      if (dueDate !== currentDueDate) {
+        payload.due_date = dueDate || null;
+      }
+      if (assignedUserId !== currentAssignedUserId) {
+        payload.assigned_user_id = assignedUserId || null;
+      }
+
+      if (Object.keys(payload).length === 0) {
+        setStatusMessage("No assignment or due date changes to save.");
+        return;
+      }
+
+      await updateTask(task.installation_id, task.id, payload, { role, email });
       setStatusMessage("Task assignment and due date updated.");
       await loadTasks();
     } catch (err: any) {
