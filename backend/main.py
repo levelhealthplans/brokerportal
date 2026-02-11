@@ -466,6 +466,34 @@ def init_db() -> None:
         )
         cur.execute(
             """
+            CREATE TABLE IF NOT EXISTS Notification(
+                id TEXT PRIMARY KEY,
+                user_id TEXT,
+                kind TEXT,
+                title TEXT,
+                body TEXT,
+                entity_type TEXT,
+                entity_id TEXT,
+                is_read INTEGER,
+                created_at TEXT,
+                read_at TEXT
+            )
+            """
+        )
+        cur.execute(
+            """
+            CREATE INDEX IF NOT EXISTS idx_notification_user_created
+            ON Notification(user_id, created_at DESC)
+            """
+        )
+        cur.execute(
+            """
+            CREATE INDEX IF NOT EXISTS idx_notification_user_read
+            ON Notification(user_id, is_read, created_at DESC)
+            """
+        )
+        cur.execute(
+            """
             CREATE TABLE IF NOT EXISTS User(
                 id TEXT PRIMARY KEY,
                 first_name TEXT,
@@ -643,6 +671,39 @@ def init_db() -> None:
             cur.execute("ALTER TABLE AuthSession ADD COLUMN created_at TEXT")
         if "last_seen_at" not in session_cols:
             cur.execute("ALTER TABLE AuthSession ADD COLUMN last_seen_at TEXT")
+
+        cur.execute("PRAGMA table_info(Notification)")
+        notification_cols = {row["name"] for row in cur.fetchall()}
+        if "user_id" not in notification_cols:
+            cur.execute("ALTER TABLE Notification ADD COLUMN user_id TEXT")
+        if "kind" not in notification_cols:
+            cur.execute("ALTER TABLE Notification ADD COLUMN kind TEXT")
+        if "title" not in notification_cols:
+            cur.execute("ALTER TABLE Notification ADD COLUMN title TEXT")
+        if "body" not in notification_cols:
+            cur.execute("ALTER TABLE Notification ADD COLUMN body TEXT")
+        if "entity_type" not in notification_cols:
+            cur.execute("ALTER TABLE Notification ADD COLUMN entity_type TEXT")
+        if "entity_id" not in notification_cols:
+            cur.execute("ALTER TABLE Notification ADD COLUMN entity_id TEXT")
+        if "is_read" not in notification_cols:
+            cur.execute("ALTER TABLE Notification ADD COLUMN is_read INTEGER")
+        if "created_at" not in notification_cols:
+            cur.execute("ALTER TABLE Notification ADD COLUMN created_at TEXT")
+        if "read_at" not in notification_cols:
+            cur.execute("ALTER TABLE Notification ADD COLUMN read_at TEXT")
+        cur.execute(
+            """
+            CREATE INDEX IF NOT EXISTS idx_notification_user_created
+            ON Notification(user_id, created_at DESC)
+            """
+        )
+        cur.execute(
+            """
+            CREATE INDEX IF NOT EXISTS idx_notification_user_read
+            ON Notification(user_id, is_read, created_at DESC)
+            """
+        )
 
         cur.execute("PRAGMA table_info(HubSpotTicketAttachmentSync)")
         attachment_cols = {row["name"] for row in cur.fetchall()}
@@ -1216,6 +1277,23 @@ class InstallationOrgBackfillOut(BaseModel):
     updated_sponsor_domain_count: int
 
 
+class NotificationOut(BaseModel):
+    id: str
+    user_id: str
+    kind: str
+    title: str
+    body: str
+    entity_type: Optional[str]
+    entity_id: Optional[str]
+    is_read: bool
+    created_at: str
+    read_at: Optional[str]
+
+
+class NotificationUnreadCountOut(BaseModel):
+    unread_count: int
+
+
 class OrganizationIn(BaseModel):
     name: str
     type: str
@@ -1323,6 +1401,50 @@ def to_user_out(row: sqlite3.Row) -> UserOut:
     data = dict(row)
     data["phone"] = data.get("phone") or ""
     return UserOut(**data)
+
+
+def to_notification_out(row: sqlite3.Row) -> NotificationOut:
+    data = dict(row)
+    data["is_read"] = bool(data.get("is_read"))
+    return NotificationOut(**data)
+
+
+def create_notification(
+    conn: sqlite3.Connection,
+    user_id: Optional[str],
+    *,
+    kind: str,
+    title: str,
+    body: str,
+    entity_type: Optional[str] = None,
+    entity_id: Optional[str] = None,
+) -> None:
+    user_key = (user_id or "").strip()
+    if not user_key:
+        return
+    cur = conn.cursor()
+    cur.execute("SELECT id FROM User WHERE id = ?", (user_key,))
+    if not cur.fetchone():
+        return
+    cur.execute(
+        """
+        INSERT INTO Notification (
+            id, user_id, kind, title, body, entity_type, entity_id, is_read, created_at, read_at
+        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+        """,
+        (
+            str(uuid.uuid4()),
+            user_key,
+            kind.strip(),
+            title.strip(),
+            body.strip(),
+            (entity_type or "").strip() or None,
+            (entity_id or "").strip() or None,
+            0,
+            now_iso(),
+            None,
+        ),
+    )
 
 
 def auth_user_payload(row: sqlite3.Row) -> AuthVerifyOut:
@@ -4974,6 +5096,7 @@ def delete_user(user_id: str, request: Request) -> Dict[str, str]:
         cur = conn.cursor()
         cur.execute("UPDATE Quote SET assigned_user_id = NULL WHERE assigned_user_id = ?", (user_id,))
         cur.execute("UPDATE Task SET assigned_user_id = NULL WHERE assigned_user_id = ?", (user_id,))
+        cur.execute("DELETE FROM Notification WHERE user_id = ?", (user_id,))
         cur.execute("DELETE FROM User WHERE id = ?", (user_id,))
         conn.commit()
     return {"status": "deleted"}
@@ -4993,6 +5116,22 @@ def assign_quotes_to_user(user_id: str, payload: UserAssignIn, request: Request)
                 f"UPDATE Quote SET assigned_user_id = ? WHERE id IN ({placeholders})",
                 [user_id] + quote_ids,
             )
+            cur.execute(
+                f"SELECT id, company FROM Quote WHERE id IN ({placeholders})",
+                quote_ids,
+            )
+            quote_name_by_id = {str(row["id"]): str(row["company"] or "Quote").strip() for row in cur.fetchall()}
+            for quote_id in quote_ids:
+                quote_name = quote_name_by_id.get(str(quote_id)) or "Quote"
+                create_notification(
+                    conn,
+                    user_id,
+                    kind="quote_assigned",
+                    title="Quote assigned",
+                    body=f"{quote_name} was assigned to you.",
+                    entity_type="quote",
+                    entity_id=str(quote_id),
+                )
         conn.commit()
     return {"status": "assigned"}
 
@@ -5011,6 +5150,37 @@ def assign_tasks_to_user(user_id: str, payload: UserAssignIn, request: Request) 
                 f"UPDATE Task SET assigned_user_id = ? WHERE id IN ({placeholders})",
                 [user_id] + task_ids,
             )
+            cur.execute(
+                f"""
+                SELECT t.id, t.title, t.installation_id, i.company
+                FROM Task t
+                JOIN Installation i ON i.id = t.installation_id
+                WHERE t.id IN ({placeholders})
+                """,
+                task_ids,
+            )
+            rows = cur.fetchall()
+            task_meta = {
+                str(row["id"]): {
+                    "title": str(row["title"] or "Task").strip(),
+                    "installation_id": str(row["installation_id"] or "").strip() or None,
+                    "company": str(row["company"] or "Implementation").strip(),
+                }
+                for row in rows
+            }
+            for task_id in task_ids:
+                task_data = task_meta.get(str(task_id))
+                if not task_data:
+                    continue
+                create_notification(
+                    conn,
+                    user_id,
+                    kind="task_assigned",
+                    title="Task assigned",
+                    body=f"{task_data['title']} for {task_data['company']} was assigned to you.",
+                    entity_type="installation",
+                    entity_id=task_data["installation_id"],
+                )
         conn.commit()
     return {"status": "assigned"}
 
@@ -5059,6 +5229,87 @@ def list_tasks(request: Request, role: Optional[str] = None, email: Optional[str
         )
         rows = cur.fetchall()
     return [TaskListOut(**dict(row)) for row in rows]
+
+
+@app.get("/api/notifications", response_model=List[NotificationOut])
+def list_notifications(request: Request, limit: int = 50) -> List[NotificationOut]:
+    safe_limit = max(1, min(limit, 200))
+    with get_db() as conn:
+        session_user = require_session_user(conn, request)
+        cur = conn.cursor()
+        cur.execute(
+            """
+            SELECT *
+            FROM Notification
+            WHERE user_id = ?
+            ORDER BY created_at DESC
+            LIMIT ?
+            """,
+            (session_user["id"], safe_limit),
+        )
+        rows = cur.fetchall()
+    return [to_notification_out(row) for row in rows]
+
+
+@app.get("/api/notifications/unread-count", response_model=NotificationUnreadCountOut)
+def get_notification_unread_count(request: Request) -> NotificationUnreadCountOut:
+    with get_db() as conn:
+        session_user = require_session_user(conn, request)
+        cur = conn.cursor()
+        cur.execute(
+            """
+            SELECT COUNT(*) AS cnt
+            FROM Notification
+            WHERE user_id = ? AND COALESCE(is_read, 0) = 0
+            """,
+            (session_user["id"],),
+        )
+        unread_count = int(cur.fetchone()["cnt"] or 0)
+    return NotificationUnreadCountOut(unread_count=unread_count)
+
+
+@app.post("/api/notifications/{notification_id}/read", response_model=NotificationOut)
+def mark_notification_read(notification_id: str, request: Request) -> NotificationOut:
+    with get_db() as conn:
+        session_user = require_session_user(conn, request)
+        read_at = now_iso()
+        cur = conn.cursor()
+        cur.execute(
+            """
+            UPDATE Notification
+            SET is_read = 1, read_at = ?
+            WHERE id = ? AND user_id = ?
+            """,
+            (read_at, notification_id, session_user["id"]),
+        )
+        cur.execute(
+            "SELECT * FROM Notification WHERE id = ? AND user_id = ?",
+            (notification_id, session_user["id"]),
+        )
+        row = cur.fetchone()
+        if not row:
+            raise HTTPException(status_code=404, detail="Notification not found")
+        conn.commit()
+    return to_notification_out(row)
+
+
+@app.post("/api/notifications/read-all")
+def mark_all_notifications_read(request: Request) -> Dict[str, Any]:
+    with get_db() as conn:
+        session_user = require_session_user(conn, request)
+        read_at = now_iso()
+        cur = conn.cursor()
+        cur.execute(
+            """
+            UPDATE Notification
+            SET is_read = 1, read_at = ?
+            WHERE user_id = ? AND COALESCE(is_read, 0) = 0
+            """,
+            (read_at, session_user["id"]),
+        )
+        updated_count = int(cur.rowcount or 0)
+        conn.commit()
+    return {"status": "ok", "updated_count": updated_count}
 
 
 @app.patch("/api/quotes/{quote_id}", response_model=QuoteOut)
@@ -5160,6 +5411,19 @@ def update_quote(quote_id: str, payload: QuoteUpdate, request: Request) -> Quote
                 WHERE quote_id = ?
                 """,
                 [install_updates[c] for c in install_columns] + [data["updated_at"], quote_id],
+            )
+        previous_assigned_user_id = (quote["assigned_user_id"] or "").strip() or None
+        updated_assigned_user_id = (data.get("assigned_user_id") or "").strip() or None
+        if updated_assigned_user_id and updated_assigned_user_id != previous_assigned_user_id:
+            quote_name = str(data.get("company") or quote["company"] or "Quote").strip() or "Quote"
+            create_notification(
+                conn,
+                updated_assigned_user_id,
+                kind="quote_assigned",
+                title="Quote assigned",
+                body=f"{quote_name} was assigned to you.",
+                entity_type="quote",
+                entity_id=quote_id,
             )
         conn.commit()
         sync_quote_to_hubspot_async(quote_id, create_if_missing=True)
@@ -6116,6 +6380,28 @@ def update_task(
             f"UPDATE Task SET {', '.join(assignments)} WHERE id = ?",
             params,
         )
+        previous_assigned_user_id = (task["assigned_user_id"] or "").strip() or None
+        updated_assigned_user_id = previous_assigned_user_id
+        if "assigned_user_id" in updates:
+            updated_assigned_user_id = (updates.get("assigned_user_id") or "").strip() or None
+        if updated_assigned_user_id and updated_assigned_user_id != previous_assigned_user_id:
+            cur.execute("SELECT company FROM Installation WHERE id = ?", (installation_id,))
+            installation = cur.fetchone()
+            installation_name = (
+                str(installation["company"] or "Implementation").strip()
+                if installation
+                else "Implementation"
+            )
+            task_title = str(task["title"] or "Task").strip() or "Task"
+            create_notification(
+                conn,
+                updated_assigned_user_id,
+                kind="task_assigned",
+                title="Task assigned",
+                body=f"{task_title} for {installation_name} was assigned to you.",
+                entity_type="installation",
+                entity_id=installation_id,
+            )
         cur.execute(
             "UPDATE Installation SET updated_at = ? WHERE id = ?",
             (now_iso(), installation_id),

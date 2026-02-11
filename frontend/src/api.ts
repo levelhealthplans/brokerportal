@@ -347,6 +347,23 @@ export type CleanupUnassignedResult = {
   updated_installation_count: number;
 };
 
+export type Notification = {
+  id: string;
+  user_id: string;
+  kind: string;
+  title: string;
+  body: string;
+  entity_type?: string | null;
+  entity_id?: string | null;
+  is_read: boolean;
+  created_at: string;
+  read_at?: string | null;
+};
+
+export type NotificationUnreadCount = {
+  unread_count: number;
+};
+
 const API_BASE = (import.meta.env.VITE_API_BASE || "/api").replace(/\/+$/, "");
 const REQUEST_TIMEOUT_MS = 15000;
 type RequestOptions = RequestInit & { timeoutMs?: number };
@@ -599,6 +616,26 @@ export function updateNetworkSettings(payload: NetworkSettings) {
 
 export function cleanupUnassignedRecords() {
   return request<CleanupUnassignedResult>("/admin/cleanup-unassigned-records", {
+    method: "POST",
+  });
+}
+
+export function getNotifications(limit = 50) {
+  return request<Notification[]>(`/notifications?limit=${encodeURIComponent(String(limit))}`);
+}
+
+export function getNotificationUnreadCount() {
+  return request<NotificationUnreadCount>("/notifications/unread-count");
+}
+
+export function markNotificationRead(notificationId: string) {
+  return request<Notification>(`/notifications/${notificationId}/read`, {
+    method: "POST",
+  });
+}
+
+export function markAllNotificationsRead() {
+  return request<{ status: string; updated_count: number }>("/notifications/read-all", {
     method: "POST",
   });
 }
