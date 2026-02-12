@@ -1788,6 +1788,53 @@ def load_census_rows(path: Path) -> tuple[List[str], List[Dict[str, Any]]]:
     )
 
 
+def normalize_census_dob(value: str) -> tuple[bool, str]:
+    raw = (value or "").strip()
+    if not raw:
+        return False, raw
+
+    date_only_formats = ("%m/%d/%Y", "%Y-%m-%d", "%Y/%m/%d")
+    for fmt in date_only_formats:
+        try:
+            datetime.strptime(raw, fmt)
+            return True, raw
+        except ValueError:
+            continue
+
+    datetime_formats = (
+        "%m/%d/%Y %H:%M",
+        "%m/%d/%Y %H:%M:%S",
+        "%Y-%m-%d %H:%M",
+        "%Y-%m-%d %H:%M:%S",
+        "%Y/%m/%d %H:%M",
+        "%Y/%m/%d %H:%M:%S",
+    )
+    for fmt in datetime_formats:
+        try:
+            parsed = datetime.strptime(raw, fmt)
+            return True, parsed.date().isoformat()
+        except ValueError:
+            continue
+
+    # Handle ISO-style datetimes (for example: 1968-01-26T00:00:00).
+    try:
+        parsed = datetime.fromisoformat(raw.replace("Z", "+00:00"))
+        return True, parsed.date().isoformat()
+    except ValueError:
+        pass
+
+    # Handle common export values like "YYYY-MM-DD 00:00:00" by parsing the first token.
+    first_token = raw.split()[0] if " " in raw else raw
+    for fmt in date_only_formats:
+        try:
+            datetime.strptime(first_token, fmt)
+            return True, first_token
+        except ValueError:
+            continue
+
+    return False, raw
+
+
 def normalize_zip(value: str) -> Optional[str]:
     digits = "".join(ch for ch in value if ch.isdigit())
     if len(digits) != 5:
@@ -6045,15 +6092,8 @@ def run_standardization(
                         add_issue(idx, key, "Invalid ZIP code", value)
                         issue_row_set.add(idx)
                 elif key == "dob":
-                    parsed = False
-                    for fmt in ("%m/%d/%Y", "%Y-%m-%d", "%Y/%m/%d"):
-                        try:
-                            datetime.strptime(value, fmt)
-                            parsed = True
-                            break
-                        except ValueError:
-                            continue
-                    standardized_row[key] = value
+                    parsed, normalized_dob = normalize_census_dob(value)
+                    standardized_row[key] = normalized_dob
                     if not parsed:
                         add_issue(idx, key, "Invalid date format", value)
                         issue_row_set.add(idx)
