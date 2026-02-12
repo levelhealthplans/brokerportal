@@ -14,7 +14,11 @@ import {
   QuoteDetail as QuoteDetailType,
 } from "../api";
 import { useAccess } from "../access";
-import { paginateItems, TablePagination } from "../components/TablePagination";
+import {
+  TABLE_PAGE_SIZE,
+  paginateItems,
+  TablePagination,
+} from "../components/TablePagination";
 import { formatNetworkLabel } from "../utils/formatNetwork";
 import { getQuoteStageClass, getQuoteStageLabel } from "../utils/quoteStatus";
 import { useAutoDismissMessage } from "../hooks/useAutoDismissMessage";
@@ -88,6 +92,11 @@ export default function QuoteDetail() {
   const [memberPage, setMemberPage] = useState(1);
   const [rankedPage, setRankedPage] = useState(1);
   const [wizardIssuesPage, setWizardIssuesPage] = useState(1);
+  const [wizardView, setWizardView] = useState<"fix_queue" | "advanced">(
+    "fix_queue",
+  );
+  const [activeIssueIndex, setActiveIssueIndex] = useState(0);
+  const [showIssueRowsOnly, setShowIssueRowsOnly] = useState(false);
   const statusMessageFading = useAutoDismissMessage(
     statusMessage,
     setStatusMessage,
@@ -383,6 +392,72 @@ export default function QuoteDetail() {
     () => paginateItems(wizardIssues, wizardIssuesPage),
     [wizardIssues, wizardIssuesPage],
   );
+  const issueRowNumbers = useMemo(
+    () =>
+      new Set(
+        wizardIssues
+          .map((issue) => Number(issue.row))
+          .filter((row) => Number.isFinite(row)),
+      ),
+    [wizardIssues],
+  );
+  const samplePreviewRows = useMemo(
+    () =>
+      showIssueRowsOnly
+        ? sampleRows.filter((row) => issueRowNumbers.has(Number(row.row)))
+        : sampleRows,
+    [sampleRows, issueRowNumbers, showIssueRowsOnly],
+  );
+  const issueSummaryRows = useMemo(() => {
+    const fieldLabelMap: Record<string, string> = {
+      first_name: "First Name",
+      last_name: "Last Name",
+      dob: "DOB",
+      zip: "ZIP",
+      gender: "Gender",
+      relationship: "Relationship",
+      enrollment_tier: "Enrollment Tier",
+    };
+    const bucketMap = new Map<
+      string,
+      { key: string; label: string; count: number; firstIndex: number }
+    >();
+    wizardIssues.forEach((issue, index) => {
+      const labelPrefix = fieldLabelMap[issue.field] || issue.field || "General";
+      const label = `${labelPrefix}: ${issue.issue}`;
+      const key = `${issue.field || "_"}:${issue.issue}`;
+      const existing = bucketMap.get(key);
+      if (existing) {
+        existing.count += 1;
+        return;
+      }
+      bucketMap.set(key, { key, label, count: 1, firstIndex: index });
+    });
+    return Array.from(bucketMap.values()).sort((a, b) => b.count - a.count);
+  }, [wizardIssues]);
+  const activeIssue = wizardIssues[activeIssueIndex] || null;
+  const activeIssueRowContext = useMemo(() => {
+    if (!activeIssue) return null;
+    return (
+      sampleRows.find((row) => Number(row.row) === Number(activeIssue.row)) ||
+      null
+    );
+  }, [activeIssue, sampleRows]);
+  const activeIssueRowContextText = useMemo(() => {
+    if (!activeIssueRowContext) return "";
+    const rowFieldLabels: Record<string, string> = {
+      first_name: "First Name",
+      last_name: "Last Name",
+      dob: "DOB",
+      zip: "ZIP",
+      gender: "Gender",
+      relationship: "Relationship",
+      enrollment_tier: "Enrollment Tier",
+    };
+    return Object.keys(rowFieldLabels)
+      .map((key) => `${rowFieldLabels[key]}: ${activeIssueRowContext[key] || "—"}`)
+      .join(" · ");
+  }, [activeIssueRowContext]);
 
   useEffect(() => {
     if (coveragePage !== coveragePagination.currentPage) {
@@ -407,6 +482,16 @@ export default function QuoteDetail() {
       setWizardIssuesPage(wizardIssuesPagination.currentPage);
     }
   }, [wizardIssuesPage, wizardIssuesPagination.currentPage]);
+
+  useEffect(() => {
+    if (wizardIssues.length === 0) {
+      setActiveIssueIndex(0);
+      return;
+    }
+    if (activeIssueIndex >= wizardIssues.length) {
+      setActiveIssueIndex(wizardIssues.length - 1);
+    }
+  }, [wizardIssues, activeIssueIndex]);
 
   const handleStageChange = async (nextStage: string) => {
     setStageDraft(nextStage);
@@ -449,6 +534,10 @@ export default function QuoteDetail() {
 
   const openWizard = () => {
     setWizardOpen(true);
+    setWizardView("fix_queue");
+    setShowIssueRowsOnly(false);
+    setActiveIssueIndex(0);
+    setWizardIssuesPage(1);
     if (latestStandardization) {
       setWizardIssues(latestStandardization.issues_json);
       setWizardStatus(latestStandardization.status);
@@ -544,6 +633,58 @@ export default function QuoteDetail() {
     } finally {
       setBusy(false);
     }
+  };
+
+  const jumpToIssueIndex = (index: number) => {
+    if (index < 0 || index >= wizardIssues.length) return;
+    setWizardView("fix_queue");
+    setActiveIssueIndex(index);
+    setWizardIssuesPage(Math.floor(index / TABLE_PAGE_SIZE) + 1);
+  };
+
+  const updateWizardIssue = (
+    index: number,
+    patch: Partial<{
+      row: number;
+      field: string;
+      value?: string;
+      mapped_value?: string;
+      issue: string;
+    }>,
+  ) => {
+    setWizardIssues((prev) => {
+      const next = [...prev];
+      if (!next[index]) return prev;
+      next[index] = { ...next[index], ...patch };
+      return next;
+    });
+  };
+
+  const getIssueGuidance = (field: string, issue: string) => {
+    const normalizedField = (field || "").toLowerCase();
+    const normalizedIssue = (issue || "").toLowerCase();
+    if (normalizedField === "dob") {
+      return "Use MM/DD/YYYY or YYYY-MM-DD. Example: 01/26/1968.";
+    }
+    if (normalizedField === "zip") {
+      return "ZIP must be 5 digits. Example: 63101.";
+    }
+    if (normalizedField === "gender") {
+      return "Use M or F.";
+    }
+    if (normalizedField === "relationship") {
+      return "Use E, S, or C.";
+    }
+    if (normalizedField === "enrollment_tier") {
+      return "Use EE, ES, EC, EF, or W.";
+    }
+    if (normalizedIssue.includes("missing required column")) {
+      return "Map this field to the matching uploaded column in Step 1.";
+    }
+    if (normalizedIssue.includes("missing value")) {
+      return "This row is missing data for a required field.";
+    }
+    return "Review this value and mapping, then run check again.";
   };
 
   const handleAssign = async () => {
@@ -1726,7 +1867,7 @@ export default function QuoteDetail() {
               </button>
             </div>
             <section style={{ marginTop: 12 }}>
-              <h3>Map Columns</h3>
+              <h3>Step 1: Map Columns</h3>
               <div className="wizard-layout">
                 <aside className="wizard-sidebar">
                   <div className="wizard-note">
@@ -1815,6 +1956,67 @@ export default function QuoteDetail() {
                   })}
                 </div>
               </div>
+              <div style={{ marginTop: 12 }}>
+                <div
+                  className="card-row"
+                  style={{ marginBottom: 8, alignItems: "center" }}
+                >
+                  <div>
+                    <strong>Sample Rows</strong>
+                    <div className="helper">
+                      Showing up to {sampleRows.length} rows from this census.
+                      Total rows scanned: {totalRows}. Rows with issues:{" "}
+                      {issueRows}.
+                    </div>
+                  </div>
+                  <label
+                    style={{
+                      display: "inline-flex",
+                      alignItems: "center",
+                      gap: 8,
+                    }}
+                  >
+                    <input
+                      type="checkbox"
+                      checked={showIssueRowsOnly}
+                      onChange={(e) => setShowIssueRowsOnly(e.target.checked)}
+                    />
+                    Show only rows with issues
+                  </label>
+                </div>
+                {samplePreviewRows.length === 0 ? (
+                  <div className="helper">
+                    No sample rows available for this filter.
+                  </div>
+                ) : (
+                  <div className="table-scroll">
+                    <table className="table slim">
+                      <thead>
+                        <tr>
+                          <th>Row</th>
+                          {Object.entries(requiredHeaderLabels).map(
+                            ([key, label]) => (
+                              <th key={`sample-head-${key}`}>{label}</th>
+                            ),
+                          )}
+                        </tr>
+                      </thead>
+                      <tbody>
+                        {samplePreviewRows.map((row, index) => (
+                          <tr key={`sample-row-${row.row || index}`}>
+                            <td>{row.row || "—"}</td>
+                            {Object.keys(requiredHeaderLabels).map((key) => (
+                              <td key={`sample-cell-${row.row}-${key}`}>
+                                {row[key] || "—"}
+                              </td>
+                            ))}
+                          </tr>
+                        ))}
+                      </tbody>
+                    </table>
+                  </div>
+                )}
+              </div>
 
               <div className="inline-actions" style={{ marginTop: 12 }}>
                 <button
@@ -1822,32 +2024,32 @@ export default function QuoteDetail() {
                   onClick={handleWizardStandardize}
                   disabled={busy}
                 >
-                  Apply Mappings
+                  Run Check
                 </button>
                 <button
                   className="button secondary"
                   onClick={handleWizardResolve}
                   disabled={busy || wizardIssues.length === 0}
                 >
-                  Save Corrections
+                  Save Issue Edits
                 </button>
                 <button
                   className="button"
                   onClick={handleWizardSubmit}
                   disabled={busy}
                 >
-                  Submit
+                  Fix &amp; Submit
                 </button>
               </div>
             </section>
 
             <section style={{ marginTop: 16 }}>
-              <h3>Issues</h3>
+              <h3>Step 2: Needs Action</h3>
               {wizardStatus && (
                 <div className="helper" style={{ marginBottom: 8 }}>
                   {wizardStatus === "Complete"
                     ? "All required fields are valid."
-                    : "Issues found. Edit values or mappings and re-check."}
+                    : "Fix issues below, then run check again."}
                 </div>
               )}
               {wizardStatus === "Complete" && wizardIssues.length === 0 && (
@@ -1879,104 +2081,248 @@ export default function QuoteDetail() {
               )}
               {wizardIssues.length > 0 && (
                 <>
-                  <div className="table-scroll">
-                    <table className="table elegant slim">
-                      <thead>
-                        <tr>
-                          <th>Row</th>
-                          <th>Field</th>
-                          <th>Value</th>
-                          <th>Mapped Value</th>
-                          <th>Issue</th>
-                        </tr>
-                      </thead>
-                      <tbody>
-                        {wizardIssuesPagination.pageItems.map(
-                          (issue, index) => {
-                            const issueIndex =
-                              wizardIssuesPagination.startItem + index - 1;
-                            return (
-                              <tr
-                                key={`${issue.row}-${issue.field}-${issueIndex}`}
-                              >
-                                <td>
-                                  <input
-                                    type="number"
-                                    value={issue.row}
-                                    onChange={(e) => {
-                                      const next = [...wizardIssues];
-                                      next[issueIndex] = {
-                                        ...issue,
-                                        row: Number(e.target.value),
-                                      };
-                                      setWizardIssues(next);
-                                    }}
-                                  />
-                                </td>
-                                <td>
-                                  <input
-                                    value={issue.field}
-                                    onChange={(e) => {
-                                      const next = [...wizardIssues];
-                                      next[issueIndex] = {
-                                        ...issue,
-                                        field: e.target.value,
-                                      };
-                                      setWizardIssues(next);
-                                    }}
-                                  />
-                                </td>
-                                <td>
-                                  <input
-                                    value={issue.value || ""}
-                                    onChange={(e) => {
-                                      const next = [...wizardIssues];
-                                      next[issueIndex] = {
-                                        ...issue,
-                                        value: e.target.value,
-                                      };
-                                      setWizardIssues(next);
-                                    }}
-                                  />
-                                </td>
-                                <td>
-                                  <input
-                                    value={issue.mapped_value || ""}
-                                    onChange={(e) => {
-                                      const next = [...wizardIssues];
-                                      next[issueIndex] = {
-                                        ...issue,
-                                        mapped_value: e.target.value,
-                                      };
-                                      setWizardIssues(next);
-                                    }}
-                                  />
-                                </td>
-                                <td>
-                                  <input
-                                    value={issue.issue}
-                                    onChange={(e) => {
-                                      const next = [...wizardIssues];
-                                      next[issueIndex] = {
-                                        ...issue,
-                                        issue: e.target.value,
-                                      };
-                                      setWizardIssues(next);
-                                    }}
-                                  />
-                                </td>
-                              </tr>
-                            );
-                          },
-                        )}
-                      </tbody>
-                    </table>
+                  <div className="notice" style={{ marginBottom: 10 }}>
+                    <strong>Issue Summary</strong>
+                    <div className="helper" style={{ marginTop: 4 }}>
+                      Click a row to jump to the first matching issue.
+                    </div>
+                    <div style={{ marginTop: 8 }}>
+                      {issueSummaryRows.map((summary) => (
+                        <div
+                          key={summary.key}
+                          className="card-row"
+                          style={{ marginBottom: 8, padding: "8px 10px" }}
+                        >
+                          <div>
+                            <strong>{summary.label}</strong>
+                            <div className="helper">{summary.count} issue(s)</div>
+                          </div>
+                          <button
+                            className="button ghost"
+                            type="button"
+                            onClick={() => jumpToIssueIndex(summary.firstIndex)}
+                          >
+                            Jump to first
+                          </button>
+                        </div>
+                      ))}
+                    </div>
                   </div>
-                  <TablePagination
-                    page={wizardIssuesPagination.currentPage}
-                    totalItems={wizardIssues.length}
-                    onPageChange={setWizardIssuesPage}
-                  />
+                  <div
+                    className="inline-actions"
+                    style={{ marginBottom: 10, justifyContent: "space-between" }}
+                  >
+                    <div className="helper">View mode</div>
+                    <div className="inline-actions">
+                      <button
+                        className={`button subtle ${wizardView === "fix_queue" ? "active-chip" : ""}`}
+                        type="button"
+                        onClick={() => setWizardView("fix_queue")}
+                      >
+                        Fix Queue
+                      </button>
+                      <button
+                        className={`button subtle ${wizardView === "advanced" ? "active-chip" : ""}`}
+                        type="button"
+                        onClick={() => setWizardView("advanced")}
+                      >
+                        Advanced Table
+                      </button>
+                    </div>
+                  </div>
+                  {wizardView === "fix_queue" && activeIssue && (
+                    <div className="section" style={{ marginTop: 0 }}>
+                      <div
+                        className="card-row"
+                        style={{ marginBottom: 10, alignItems: "center" }}
+                      >
+                        <div>
+                          <strong>
+                            Issue {activeIssueIndex + 1} of {wizardIssues.length}
+                          </strong>
+                          <div className="helper">
+                            Row {activeIssue.row} · {activeIssue.field}
+                          </div>
+                        </div>
+                        <div className="inline-actions">
+                          <button
+                            className="button ghost"
+                            type="button"
+                            onClick={() =>
+                              jumpToIssueIndex(Math.max(0, activeIssueIndex - 1))
+                            }
+                            disabled={activeIssueIndex <= 0}
+                          >
+                            Previous
+                          </button>
+                          <button
+                            className="button ghost"
+                            type="button"
+                            onClick={() =>
+                              jumpToIssueIndex(
+                                Math.min(wizardIssues.length - 1, activeIssueIndex + 1),
+                              )
+                            }
+                            disabled={activeIssueIndex >= wizardIssues.length - 1}
+                          >
+                            Next
+                          </button>
+                        </div>
+                      </div>
+                      <div className="form-grid">
+                        <label>
+                          Row
+                          <input
+                            type="number"
+                            value={activeIssue.row}
+                            onChange={(e) =>
+                              updateWizardIssue(activeIssueIndex, {
+                                row: Number(e.target.value),
+                              })
+                            }
+                          />
+                        </label>
+                        <label>
+                          Field
+                          <input
+                            value={activeIssue.field}
+                            onChange={(e) =>
+                              updateWizardIssue(activeIssueIndex, {
+                                field: e.target.value,
+                              })
+                            }
+                          />
+                        </label>
+                        <label>
+                          Value
+                          <input
+                            value={activeIssue.value || ""}
+                            onChange={(e) =>
+                              updateWizardIssue(activeIssueIndex, {
+                                value: e.target.value,
+                              })
+                            }
+                          />
+                        </label>
+                        <label>
+                          Mapped Value
+                          <input
+                            value={activeIssue.mapped_value || ""}
+                            onChange={(e) =>
+                              updateWizardIssue(activeIssueIndex, {
+                                mapped_value: e.target.value,
+                              })
+                            }
+                          />
+                        </label>
+                        <label>
+                          Issue
+                          <input
+                            value={activeIssue.issue}
+                            onChange={(e) =>
+                              updateWizardIssue(activeIssueIndex, {
+                                issue: e.target.value,
+                              })
+                            }
+                          />
+                        </label>
+                      </div>
+                      <div className="notice" style={{ marginTop: 10 }}>
+                        <strong>Guidance</strong>
+                        <div className="helper">
+                          {getIssueGuidance(activeIssue.field, activeIssue.issue)}
+                        </div>
+                        {activeIssueRowContext && (
+                          <div className="helper" style={{ marginTop: 6 }}>
+                            Row context: {activeIssueRowContextText}
+                          </div>
+                        )}
+                      </div>
+                    </div>
+                  )}
+                  {wizardView === "advanced" && (
+                    <>
+                      <div className="table-scroll">
+                        <table className="table elegant slim">
+                          <thead>
+                            <tr>
+                              <th>Row</th>
+                              <th>Field</th>
+                              <th>Value</th>
+                              <th>Mapped Value</th>
+                              <th>Issue</th>
+                            </tr>
+                          </thead>
+                          <tbody>
+                            {wizardIssuesPagination.pageItems.map((issue, index) => {
+                              const issueIndex =
+                                wizardIssuesPagination.startItem + index - 1;
+                              return (
+                                <tr key={`${issue.row}-${issue.field}-${issueIndex}`}>
+                                  <td>
+                                    <input
+                                      type="number"
+                                      value={issue.row}
+                                      onChange={(e) =>
+                                        updateWizardIssue(issueIndex, {
+                                          row: Number(e.target.value),
+                                        })
+                                      }
+                                    />
+                                  </td>
+                                  <td>
+                                    <input
+                                      value={issue.field}
+                                      onChange={(e) =>
+                                        updateWizardIssue(issueIndex, {
+                                          field: e.target.value,
+                                        })
+                                      }
+                                    />
+                                  </td>
+                                  <td>
+                                    <input
+                                      value={issue.value || ""}
+                                      onChange={(e) =>
+                                        updateWizardIssue(issueIndex, {
+                                          value: e.target.value,
+                                        })
+                                      }
+                                    />
+                                  </td>
+                                  <td>
+                                    <input
+                                      value={issue.mapped_value || ""}
+                                      onChange={(e) =>
+                                        updateWizardIssue(issueIndex, {
+                                          mapped_value: e.target.value,
+                                        })
+                                      }
+                                    />
+                                  </td>
+                                  <td>
+                                    <input
+                                      value={issue.issue}
+                                      onChange={(e) =>
+                                        updateWizardIssue(issueIndex, {
+                                          issue: e.target.value,
+                                        })
+                                      }
+                                    />
+                                  </td>
+                                </tr>
+                              );
+                            })}
+                          </tbody>
+                        </table>
+                      </div>
+                      <TablePagination
+                        page={wizardIssuesPagination.currentPage}
+                        totalItems={wizardIssues.length}
+                        onPageChange={setWizardIssuesPage}
+                      />
+                    </>
+                  )}
                 </>
               )}
             </section>
