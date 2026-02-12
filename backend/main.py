@@ -1,7 +1,9 @@
 from __future__ import annotations
 
 import csv
+import base64
 import hashlib
+import hmac
 import json
 import mimetypes
 import os
@@ -133,6 +135,11 @@ HUBSPOT_API_BASE = "https://api.hubapi.com"
 HUBSPOT_OAUTH_AUTHORIZE_URL = "https://app.hubspot.com/oauth/authorize"
 HUBSPOT_OAUTH_TOKEN_URL = "https://api.hubapi.com/oauth/v1/token"
 HUBSPOT_OAUTH_STATE_MINUTES = 15
+hubspot_signature_max_age_raw = (os.getenv("HUBSPOT_SIGNATURE_MAX_AGE_SECONDS", "300") or "300").strip()
+try:
+    HUBSPOT_SIGNATURE_MAX_AGE_SECONDS = max(0, int(hubspot_signature_max_age_raw))
+except Exception:
+    HUBSPOT_SIGNATURE_MAX_AGE_SECONDS = 300
 HUBSPOT_FILES_FOLDER_ROOT = (os.getenv("HUBSPOT_FILES_FOLDER_ROOT", "/level-health/quote-attachments") or "").strip()
 HUBSPOT_TICKET_RESERVED_PROPERTIES = {
     "subject",
@@ -2434,6 +2441,83 @@ def parse_iso_datetime(value: Optional[str]) -> Optional[datetime]:
         return None
 
 
+def normalize_hubspot_signature_uri(uri: str) -> str:
+    parsed = urlparse.urlsplit(uri or "")
+    scheme = (parsed.scheme or "").strip().lower()
+    hostname = (parsed.hostname or "").strip()
+    if not scheme or not hostname:
+        return uri or ""
+    port = parsed.port
+    use_port = port and not ((scheme == "https" and port == 443) or (scheme == "http" and port == 80))
+    netloc = f"{hostname}:{port}" if use_port else hostname
+    path = urlparse.unquote(parsed.path or "")
+    query = urlparse.unquote(parsed.query or "")
+    normalized = f"{scheme}://{netloc}{path}"
+    if query:
+        normalized = f"{normalized}?{query}"
+    return normalized
+
+
+def build_hubspot_signature_v3(
+    secret: str,
+    *,
+    method: str,
+    uri: str,
+    body: str,
+    timestamp: str,
+) -> str:
+    secret_value = (secret or "").strip()
+    source = f"{(method or '').upper()}{uri or ''}{body or ''}{timestamp or ''}"
+    digest = hmac.new(
+        secret_value.encode("utf-8"),
+        source.encode("utf-8"),
+        hashlib.sha256,
+    ).digest()
+    return base64.b64encode(digest).decode("utf-8")
+
+
+def is_hubspot_request_timestamp_fresh(timestamp: str, *, now_ms: Optional[int] = None) -> bool:
+    text = str(timestamp or "").strip()
+    if not text:
+        return False
+    try:
+        parsed = int(text)
+    except Exception:
+        return False
+    if HUBSPOT_SIGNATURE_MAX_AGE_SECONDS <= 0:
+        return True
+    current_ms = now_ms if now_ms is not None else int(datetime.utcnow().timestamp() * 1000)
+    return abs(current_ms - parsed) <= HUBSPOT_SIGNATURE_MAX_AGE_SECONDS * 1000
+
+
+def verify_hubspot_request_signature(request: Request, raw_body: bytes) -> None:
+    secret = (
+        (os.getenv("HUBSPOT_APP_CLIENT_SECRET", "") or "").strip()
+        or (os.getenv("HUBSPOT_CLIENT_SECRET", "") or "").strip()
+    )
+    if not secret:
+        raise HTTPException(status_code=503, detail="HubSpot request signature secret is not configured")
+
+    timestamp = str(request.headers.get("x-hubspot-request-timestamp") or "").strip()
+    provided_signature = str(request.headers.get("x-hubspot-signature-v3") or "").strip()
+    if not timestamp or not provided_signature:
+        raise HTTPException(status_code=401, detail="Missing HubSpot request signature")
+    if not is_hubspot_request_timestamp_fresh(timestamp):
+        raise HTTPException(status_code=401, detail="HubSpot request signature timestamp is stale")
+
+    uri = normalize_hubspot_signature_uri(str(request.url))
+    payload_text = raw_body.decode("utf-8")
+    expected_signature = build_hubspot_signature_v3(
+        secret,
+        method=request.method,
+        uri=uri,
+        body=payload_text,
+        timestamp=timestamp,
+    )
+    if not secrets.compare_digest(expected_signature, provided_signature):
+        raise HTTPException(status_code=401, detail="Invalid HubSpot request signature")
+
+
 def read_json_dict_file(path: Path) -> Dict[str, Any]:
     if not path.exists():
         return {}
@@ -2713,6 +2797,162 @@ def build_hubspot_ticket_url(portal_id: str, ticket_id: str) -> Optional[str]:
     if not portal or not ticket:
         return None
     return f"https://app.hubspot.com/contacts/{portal}/record/0-5/{ticket}"
+
+
+def first_non_empty_string(*values: Any) -> Optional[str]:
+    for value in values:
+        text = str(value or "").strip()
+        if text:
+            return text
+    return None
+
+
+def parse_assignment_coverage_percentage(result_json: Any) -> Optional[float]:
+    if not isinstance(result_json, dict):
+        return None
+    for key in (
+        "coverage_percentage",
+        "coverage",
+        "direct_contract_coverage",
+        "direct_contract_percentage",
+    ):
+        raw_value = result_json.get(key)
+        if raw_value is None:
+            continue
+        try:
+            parsed = float(raw_value)
+        except Exception:
+            continue
+        if parsed < 0:
+            continue
+        if parsed > 1 and parsed <= 100:
+            parsed = parsed / 100.0
+        if parsed > 1:
+            continue
+        return round(parsed, 4)
+    return None
+
+
+def parse_assignment_flag(result_json: Any, key: str) -> Optional[bool]:
+    if not isinstance(result_json, dict):
+        return None
+    raw = result_json.get(key)
+    if raw is None:
+        return None
+    if isinstance(raw, bool):
+        return raw
+    text = str(raw).strip().lower()
+    if text in {"1", "true", "yes", "on"}:
+        return True
+    if text in {"0", "false", "no", "off"}:
+        return False
+    return None
+
+
+def lookup_quote_for_hubspot_card(
+    conn: sqlite3.Connection,
+    *,
+    quote_id: Optional[str],
+    hubspot_ticket_id: Optional[str],
+) -> tuple[Optional[sqlite3.Row], Optional[str]]:
+    cur = conn.cursor()
+    normalized_quote_id = str(quote_id or "").strip()
+    if normalized_quote_id:
+        cur.execute("SELECT * FROM Quote WHERE id = ? LIMIT 1", (normalized_quote_id,))
+        row = cur.fetchone()
+        if row:
+            return row, "quote_id"
+    normalized_ticket_id = str(hubspot_ticket_id or "").strip()
+    if normalized_ticket_id:
+        cur.execute(
+            """
+            SELECT * FROM Quote
+            WHERE hubspot_ticket_id = ?
+            ORDER BY updated_at DESC
+            LIMIT 1
+            """,
+            (normalized_ticket_id,),
+        )
+        row = cur.fetchone()
+        if row:
+            return row, "hubspot_ticket_id"
+    return None, None
+
+
+def build_hubspot_card_data_for_quote(
+    conn: sqlite3.Connection,
+    quote_row: sqlite3.Row,
+    *,
+    resolved_by: str,
+    request_quote_id: Optional[str],
+    request_ticket_id: Optional[str],
+) -> Dict[str, Any]:
+    quote = dict(quote_row)
+    quote_id = str(quote.get("id") or "").strip()
+    cur = conn.cursor()
+    cur.execute(
+        """
+        SELECT recommendation, confidence, result_json, created_at
+        FROM AssignmentRun
+        WHERE quote_id = ?
+        ORDER BY created_at DESC
+        LIMIT 1
+        """,
+        (quote_id,),
+    )
+    assignment_row = cur.fetchone()
+    assignment_payload: Dict[str, Any] = {}
+    if assignment_row:
+        try:
+            parsed = json.loads(assignment_row["result_json"] or "{}")
+            if isinstance(parsed, dict):
+                assignment_payload = parsed
+        except Exception:
+            assignment_payload = {}
+
+    network_settings = read_network_settings()
+    coverage_percentage = parse_assignment_coverage_percentage(assignment_payload)
+    fallback_used = parse_assignment_flag(assignment_payload, "fallback_used")
+    if fallback_used is None and coverage_percentage is not None:
+        fallback_used = coverage_percentage < float(network_settings.get("coverage_threshold") or 0.9)
+    review_required = parse_assignment_flag(assignment_payload, "review_required")
+
+    quote_url = f"{FRONTEND_BASE_URL}/quotes/{quote_id}" if quote_id else None
+    return {
+        "status": "ok",
+        "resolved_by": resolved_by,
+        "request": {
+            "quote_id": request_quote_id,
+            "hubspot_ticket_id": request_ticket_id,
+        },
+        "quote": {
+            "id": quote_id,
+            "company": quote.get("company") or "",
+            "status": quote.get("status") or "",
+            "effective_date": quote.get("effective_date") or "",
+            "primary_network": quote.get("primary_network"),
+            "secondary_network": quote.get("secondary_network"),
+            "tpa": quote.get("tpa"),
+            "stoploss": quote.get("stoploss"),
+            "current_carrier": quote.get("current_carrier"),
+            "renewal_comparison": quote.get("renewal_comparison"),
+            "needs_action": bool(quote.get("needs_action")),
+            "hubspot_ticket_id": quote.get("hubspot_ticket_id"),
+            "hubspot_ticket_url": quote.get("hubspot_ticket_url"),
+            "hubspot_last_synced_at": quote.get("hubspot_last_synced_at"),
+            "hubspot_sync_error": quote.get("hubspot_sync_error"),
+            "quote_url": quote_url,
+        },
+        "assignment": {
+            "recommendation": assignment_row["recommendation"] if assignment_row else None,
+            "confidence": assignment_row["confidence"] if assignment_row else None,
+            "coverage_percentage": coverage_percentage,
+            "fallback_used": fallback_used,
+            "review_required": review_required,
+            "coverage_threshold": network_settings.get("coverage_threshold"),
+            "default_network": network_settings.get("default_network"),
+        },
+    }
 
 
 def render_hubspot_template(template: str, quote: Dict[str, Any]) -> str:
@@ -4784,6 +5024,77 @@ def resync_all_quotes_to_hubspot(request: Request) -> HubSpotBulkResyncResponse:
             mismatch_quotes=len(mismatches),
             buckets=[HubSpotBulkMismatchBucketOut(**bucket) for bucket in buckets],
             mismatches=[HubSpotBulkQuoteMismatchOut(**mismatch) for mismatch in mismatches],
+        )
+
+
+@app.post("/api/integrations/hubspot/card-data")
+async def get_hubspot_card_data(request: Request) -> Dict[str, Any]:
+    raw_body = await request.body()
+    verify_hubspot_request_signature(request, raw_body)
+
+    payload: Dict[str, Any] = {}
+    if raw_body:
+        try:
+            loaded = json.loads(raw_body.decode("utf-8"))
+        except Exception:
+            raise HTTPException(status_code=400, detail="Request body must be valid JSON")
+        if not isinstance(loaded, dict):
+            raise HTTPException(status_code=400, detail="Request body must be a JSON object")
+        payload = loaded
+
+    properties = payload.get("properties")
+    if not isinstance(properties, dict):
+        properties = {}
+    context = payload.get("context")
+    if not isinstance(context, dict):
+        context = {}
+    crm_context = context.get("crm")
+    if not isinstance(crm_context, dict):
+        crm_context = {}
+    crm_properties = crm_context.get("properties")
+    if not isinstance(crm_properties, dict):
+        crm_properties = {}
+
+    quote_id = first_non_empty_string(
+        payload.get("quote_id"),
+        payload.get("level_health_quote_id"),
+        payload.get("quoteId"),
+        properties.get("level_health_quote_id"),
+        crm_properties.get("level_health_quote_id"),
+    )
+    ticket_id = first_non_empty_string(
+        payload.get("ticket_id"),
+        payload.get("ticketId"),
+        payload.get("objectId"),
+        payload.get("object_id"),
+        payload.get("hs_object_id"),
+        properties.get("hs_ticket_id"),
+        properties.get("hs_object_id"),
+        crm_context.get("objectId"),
+        crm_properties.get("hs_ticket_id"),
+        crm_properties.get("hs_object_id"),
+    )
+
+    with get_db() as conn:
+        quote_row, resolved_by = lookup_quote_for_hubspot_card(
+            conn,
+            quote_id=quote_id,
+            hubspot_ticket_id=ticket_id,
+        )
+        if not quote_row:
+            return {
+                "status": "not_found",
+                "request": {
+                    "quote_id": quote_id,
+                    "hubspot_ticket_id": ticket_id,
+                },
+            }
+        return build_hubspot_card_data_for_quote(
+            conn,
+            quote_row,
+            resolved_by=resolved_by or "unknown",
+            request_quote_id=quote_id,
+            request_ticket_id=ticket_id,
         )
 
 

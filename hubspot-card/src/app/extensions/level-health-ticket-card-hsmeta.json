@@ -1,0 +1,22 @@
+{
+  "type": "card",
+  "data": {
+    "title": "Level Health Quote",
+    "uid": "level_health_ticket_card",
+    "location": "crm.record.tab",
+    "module": {
+      "file": "level-health-ticket-card.tsx"
+    },
+    "objectTypes": [
+      {
+        "name": "tickets"
+      }
+    ],
+    "propertiesToSend": [
+      "hs_ticket_id",
+      "subject",
+      "hs_pipeline_stage",
+      "level_health_quote_id"
+    ]
+  }
+}
