@@ -705,12 +705,65 @@ def fetch_org_by_domain(
     return cur.fetchone()
 
 
+def fetch_user_by_email(conn: sqlite3.Connection, email: Optional[str]) -> Optional[sqlite3.Row]:
+    normalized_email = (email or "").strip().lower()
+    if not normalized_email:
+        return None
+    cur = conn.cursor()
+    cur.execute(
+        "SELECT * FROM User WHERE email = ? LIMIT 1",
+        (normalized_email,),
+    )
+    return cur.fetchone()
+
+
+def resolve_sponsor_scope(
+    conn: sqlite3.Connection,
+    email: Optional[str],
+) -> tuple[List[str], Optional[str]]:
+    normalized_email = (email or "").strip().lower()
+    domains: List[str] = []
+    email_based_domain = email_domain(normalized_email)
+    if email_based_domain:
+        domains.append(email_based_domain)
+
+    user = fetch_user_by_email(conn, normalized_email)
+    user_id = None
+    if user:
+        user_id = (user["id"] or "").strip() or None
+        org_domain = str(user["organization"] or "").strip().lower()
+        if org_domain and org_domain not in domains:
+            domains.append(org_domain)
+    return domains, user_id
+
+
+def build_sponsor_installation_filter(
+    conn: sqlite3.Connection,
+    email: Optional[str],
+    *,
+    include_assigned_user: bool = True,
+) -> tuple[str, List[Any]]:
+    sponsor_domains, user_id = resolve_sponsor_scope(conn, email)
+    clauses: List[str] = []
+    params: List[Any] = []
+    for domain in sponsor_domains:
+        clauses.append("sponsor_domain = ?")
+        params.append(domain)
+    if include_assigned_user and user_id:
+        clauses.append("id IN (SELECT installation_id FROM Task WHERE assigned_user_id = ?)")
+        params.append(user_id)
+    if not clauses:
+        return "WHERE 1 = 0", []
+    return f"WHERE ({' OR '.join(clauses)})", params
+
+
 def build_access_filter(
     conn: sqlite3.Connection,
     role: Optional[str],
     email: Optional[str],
     *,
     include_assigned_user: bool = True,
+    resource: str = "quote",
 ) -> tuple[str, List[Any]]:
     if not role or role == "admin":
         return "", []
@@ -720,32 +773,43 @@ def build_access_filter(
         org = fetch_org_by_domain(conn, "broker", domain)
         broker_org = org["name"] if org else broker_org_from_email(normalized_email)
 
+        user = fetch_user_by_email(conn, normalized_email)
         user_id = None
-        if normalized_email:
-            cur = conn.cursor()
-            cur.execute("SELECT id, organization FROM User WHERE email = ?", (normalized_email,))
-            user = cur.fetchone()
-            if user:
-                user_id = (user["id"] or "").strip() or None
-                if not broker_org:
-                    broker_org = (user["organization"] or "").strip() or None
+        if user:
+            user_id = (user["id"] or "").strip() or None
+            if not broker_org:
+                broker_org = (user["organization"] or "").strip() or None
 
         clauses: List[str] = []
         params: List[Any] = []
         if broker_org:
             clauses.append("broker_org = ?")
             params.append(broker_org)
-        if include_assigned_user and user_id:
+        if include_assigned_user and user_id and resource in {"quote", "task"}:
             clauses.append("assigned_user_id = ?")
             params.append(user_id)
         if not clauses:
             return "WHERE 1 = 0", []
         return f"WHERE ({' OR '.join(clauses)})", params
     if role == "sponsor":
-        domain = email_domain((email or "").strip().lower())
-        if not domain:
+        sponsor_domains, user_id = resolve_sponsor_scope(conn, email)
+        clauses: List[str] = []
+        params: List[Any] = []
+        for domain in sponsor_domains:
+            clauses.append("sponsor_domain = ?")
+            params.append(domain)
+        if include_assigned_user and user_id:
+            if resource in {"quote", "task"}:
+                clauses.append("assigned_user_id = ?")
+                params.append(user_id)
+            if resource == "quote":
+                clauses.append(
+                    "id IN (SELECT i.quote_id FROM Installation i JOIN Task t ON t.installation_id = i.id WHERE t.assigned_user_id = ?)"
+                )
+                params.append(user_id)
+        if not clauses:
             return "WHERE 1 = 0", []
-        return "WHERE sponsor_domain = ?", [domain]
+        return f"WHERE ({' OR '.join(clauses)})", params
     return "WHERE 1 = 0", []
 
 
@@ -5524,7 +5588,12 @@ def list_quotes(
     with get_db() as conn:
         cur = conn.cursor()
         scoped_role, scoped_email = resolve_access_scope(conn, request, role, email)
-        where_clause, params = build_access_filter(conn, scoped_role, scoped_email)
+        where_clause, params = build_access_filter(
+            conn,
+            scoped_role,
+            scoped_email,
+            resource="quote",
+        )
         cur.execute(f"SELECT * FROM Quote {where_clause} ORDER BY created_at DESC", params)
         rows = cur.fetchall()
         quotes: List[QuoteListOut] = []
@@ -5657,7 +5726,12 @@ def get_quote_detail(
     with get_db() as conn:
         scoped_role, scoped_email = resolve_access_scope(conn, request, role, email)
         if scoped_role != "admin":
-            where_clause, params = build_access_filter(conn, scoped_role, scoped_email)
+            where_clause, params = build_access_filter(
+                conn,
+                scoped_role,
+                scoped_email,
+                resource="quote",
+            )
             if where_clause:
                 cur = conn.cursor()
                 cur.execute(
@@ -6212,7 +6286,12 @@ def list_tasks(request: Request, role: Optional[str] = None, email: Optional[str
     with get_db() as conn:
         cur = conn.cursor()
         scoped_role, scoped_email = resolve_access_scope(conn, request, role, email)
-        where_clause, params = build_access_filter(conn, scoped_role, scoped_email)
+        where_clause, params = build_access_filter(
+            conn,
+            scoped_role,
+            scoped_email,
+            resource="task",
+        )
         cur.execute(
             f"""
             SELECT
@@ -7165,12 +7244,20 @@ def list_installations(
     with get_db() as conn:
         cur = conn.cursor()
         scoped_role, scoped_email = resolve_access_scope(conn, request, role, email)
-        where_clause, params = build_access_filter(
-            conn,
-            scoped_role,
-            scoped_email,
-            include_assigned_user=False,
-        )
+        if scoped_role == "sponsor":
+            where_clause, params = build_sponsor_installation_filter(
+                conn,
+                scoped_email,
+                include_assigned_user=True,
+            )
+        else:
+            where_clause, params = build_access_filter(
+                conn,
+                scoped_role,
+                scoped_email,
+                include_assigned_user=False,
+                resource="quote",
+            )
         cur.execute(
             f"SELECT * FROM Installation {where_clause} ORDER BY created_at DESC",
             params,
@@ -7193,12 +7280,20 @@ def require_installation_access(
     if not installation:
         raise HTTPException(status_code=404, detail="Installation not found")
     if scoped_role != "admin":
-        where_clause, params = build_access_filter(
-            conn,
-            scoped_role,
-            scoped_email,
-            include_assigned_user=False,
-        )
+        if scoped_role == "sponsor":
+            where_clause, params = build_sponsor_installation_filter(
+                conn,
+                scoped_email,
+                include_assigned_user=True,
+            )
+        else:
+            where_clause, params = build_access_filter(
+                conn,
+                scoped_role,
+                scoped_email,
+                include_assigned_user=False,
+                resource="quote",
+            )
         if where_clause:
             cur.execute(
                 f"SELECT id FROM Installation {where_clause} AND id = ? LIMIT 1",

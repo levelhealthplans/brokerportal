@@ -530,6 +530,53 @@ class InstallationRegressionTests(unittest.TestCase):
         self.assertEqual(launched.open_url, selected_url)
         mocked_api.assert_not_called()
 
+    def test_sponsor_with_assigned_task_can_see_tasks_installations_and_quote(self) -> None:
+        quote = self._create_quote()
+        installation = self._create_installation(quote.id)
+        sponsor_user_id = self._create_sponsor_user(
+            email="sponsor.viewer@gmail.com",
+            organization="External Sponsor",
+        )
+
+        with main.get_db() as conn:
+            cur = conn.cursor()
+            cur.execute(
+                """
+                SELECT id
+                FROM Task
+                WHERE installation_id = ? AND title = ?
+                LIMIT 1
+                """,
+                (installation.id, "Stoploss Disclosure"),
+            )
+            task = cur.fetchone()
+            self.assertIsNotNone(task)
+            stoploss_task_id = task["id"]
+            cur.execute(
+                """
+                UPDATE Task
+                SET assigned_user_id = ?
+                WHERE id = ?
+                """,
+                (sponsor_user_id, stoploss_task_id),
+            )
+            conn.commit()
+
+        with patch.object(
+            main,
+            "resolve_access_scope",
+            return_value=("sponsor", "sponsor.viewer@gmail.com"),
+        ):
+            sponsor_tasks = main.list_tasks(request=object())
+            sponsor_installations = main.list_installations(request=object())
+            sponsor_quotes = main.list_quotes(request=object())
+            detail = main.get_installation_detail(installation.id, request=object())
+
+        self.assertTrue(any(task.id == stoploss_task_id for task in sponsor_tasks))
+        self.assertTrue(any(item.id == installation.id for item in sponsor_installations))
+        self.assertTrue(any(item.id == quote.id for item in sponsor_quotes))
+        self.assertEqual(detail["installation"]["id"], installation.id)
+
     def test_delete_installation_removes_tasks_and_docs(self) -> None:
         quote = self._create_quote()
         installation = self._create_installation(quote.id)
