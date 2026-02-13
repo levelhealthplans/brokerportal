@@ -195,6 +195,29 @@ class InstallationRegressionTests(unittest.TestCase):
         self.assertIsNone(updated.manual_network)
         self.assertEqual(updated.primary_network, "Mercy_MO")
 
+    def test_run_assignment_updates_quote_primary_network_and_syncs_hubspot(self) -> None:
+        quote = self._create_quote()
+        rows = [{"zip": "63011"} for _ in range(9)] + [{"zip": "99999"}]
+        with patch.object(main, "latest_census_upload", return_value={"path": "fake.csv"}), patch.object(
+            main, "load_network_mapping", return_value={"63011": "Mercy_MO"}
+        ), patch.object(
+            main,
+            "read_network_settings",
+            return_value={"default_network": "Cigna_PPO", "coverage_threshold": 0.90},
+        ), patch.object(
+            main, "load_census_rows", return_value=(["zip"], rows)
+        ), patch.object(
+            main, "sync_quote_to_hubspot_async", return_value=None
+        ) as sync_mock:
+            assignment = main.run_assignment(quote.id)
+
+        self.assertEqual(assignment.recommendation, "Mercy_MO")
+        with main.get_db() as conn:
+            refreshed = main.fetch_quote(conn, quote.id)
+            self.assertEqual(refreshed["primary_network"], "Mercy_MO")
+            self.assertIsNone(refreshed["manual_network"])
+        sync_mock.assert_called_once_with(quote.id, create_if_missing=False)
+
     def test_quote_broker_org_and_sponsor_domain_propagate_to_installation(self) -> None:
         quote = self._create_quote()
         installation = self._create_installation(quote.id)

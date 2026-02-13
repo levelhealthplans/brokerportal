@@ -59,6 +59,22 @@ class HubspotSettingsStorageTests(unittest.TestCase):
             "level_health_company_cached",
         )
         self.assertEqual(loaded["property_mappings"]["company"], "level_health_company_cached")
+        self.assertEqual(
+            loaded["property_mappings"]["primary_network"],
+            "level_health_primary_network",
+        )
+        self.assertEqual(
+            loaded["property_mappings"]["secondary_network"],
+            "level_health_secondary_network",
+        )
+        self.assertEqual(
+            loaded["property_mappings"]["renewal_comparison"],
+            "level_health_renewal_comparison",
+        )
+        self.assertEqual(
+            loaded["property_mappings"]["broker_fee_pepm"],
+            "level_health_broker_fee_pepm",
+        )
         self.assertEqual(loaded["oauth_hub_id"], "7106327")
         self.assertTrue(loaded["oauth_connected"])
 
@@ -81,6 +97,22 @@ class HubspotSettingsStorageTests(unittest.TestCase):
         stored = json.loads(self.settings_path.read_text(encoding="utf-8"))
         self.assertEqual(stored["portal_id"], "7106327")
         self.assertEqual(stored["property_mappings"]["company"], "level_health_company_cached")
+        self.assertEqual(
+            stored["property_mappings"]["primary_network"],
+            "level_health_primary_network",
+        )
+        self.assertEqual(
+            stored["property_mappings"]["secondary_network"],
+            "level_health_secondary_network",
+        )
+        self.assertEqual(
+            stored["property_mappings"]["renewal_comparison"],
+            "level_health_renewal_comparison",
+        )
+        self.assertEqual(
+            stored["property_mappings"]["broker_fee_pepm"],
+            "level_health_broker_fee_pepm",
+        )
         self.assertEqual(stored["quote_status_to_stage"]["Draft"], "101")
 
 

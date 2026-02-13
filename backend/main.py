@@ -2902,6 +2902,15 @@ def normalize_ticket_property_mappings(value: Optional[Dict[str, Any]]) -> Dict[
     return cleaned
 
 
+def merge_ticket_property_mappings(
+    configured: Optional[Dict[str, Any]],
+    defaults: Optional[Dict[str, Any]],
+) -> Dict[str, str]:
+    merged = normalize_ticket_property_mappings(defaults)
+    merged.update(normalize_ticket_property_mappings(configured))
+    return merged
+
+
 def default_hubspot_settings() -> Dict[str, Any]:
     return {
         "enabled": False,
@@ -2918,6 +2927,10 @@ def default_hubspot_settings() -> Dict[str, Any]:
             "status": "level_health_quote_status",
             "effective_date": "level_health_effective_date",
             "broker_org": "level_health_broker_org",
+            "broker_fee_pepm": "level_health_broker_fee_pepm",
+            "primary_network": "level_health_primary_network",
+            "secondary_network": "level_health_secondary_network",
+            "renewal_comparison": "level_health_renewal_comparison",
         },
         "quote_status_to_stage": {},
         "stage_to_quote_status": {},
@@ -2940,7 +2953,10 @@ def serialize_hubspot_settings_for_storage(settings: Dict[str, Any]) -> Dict[str
         "sync_hubspot_to_quote": bool(settings.get("sync_hubspot_to_quote", True)),
         "ticket_subject_template": str(settings.get("ticket_subject_template") or "").strip(),
         "ticket_content_template": str(settings.get("ticket_content_template") or "").strip(),
-        "property_mappings": normalize_ticket_property_mappings(settings.get("property_mappings")),
+        "property_mappings": merge_ticket_property_mappings(
+            settings.get("property_mappings"),
+            default_hubspot_settings()["property_mappings"],
+        ),
         "quote_status_to_stage": normalize_mapping_dict(settings.get("quote_status_to_stage")),
         "stage_to_quote_status": normalize_mapping_dict(settings.get("stage_to_quote_status")),
         "oauth_redirect_uri": str(settings.get("oauth_redirect_uri") or "").strip(),
@@ -3095,8 +3111,9 @@ def read_hubspot_settings(*, include_token: bool = False) -> Dict[str, Any]:
             raw.get("ticket_content_template") or defaults["ticket_content_template"]
         ).strip()
         or defaults["ticket_content_template"],
-        "property_mappings": normalize_ticket_property_mappings(
-            raw.get("property_mappings") or defaults["property_mappings"]
+        "property_mappings": merge_ticket_property_mappings(
+            raw.get("property_mappings"),
+            defaults["property_mappings"],
         ),
         "quote_status_to_stage": normalize_mapping_dict(raw.get("quote_status_to_stage")),
         "stage_to_quote_status": normalize_mapping_dict(raw.get("stage_to_quote_status")),
@@ -3141,10 +3158,11 @@ def write_hubspot_settings(
             payload.ticket_content_template or current["ticket_content_template"]
         ).strip()
         or current["ticket_content_template"],
-        "property_mappings": normalize_ticket_property_mappings(
+        "property_mappings": merge_ticket_property_mappings(
             payload.property_mappings
             if payload.property_mappings is not None
-            else current["property_mappings"]
+            else current["property_mappings"],
+            default_hubspot_settings()["property_mappings"],
         ),
         "quote_status_to_stage": normalize_mapping_dict(
             payload.quote_status_to_stage
@@ -3577,7 +3595,10 @@ def build_hubspot_ticket_properties(quote: Dict[str, Any], settings: Dict[str, A
     if stage_id:
         properties["hs_pipeline_stage"] = stage_id
 
-    property_mappings = normalize_ticket_property_mappings(settings.get("property_mappings") or {})
+    property_mappings = merge_ticket_property_mappings(
+        settings.get("property_mappings"),
+        default_hubspot_settings()["property_mappings"],
+    )
     for local_key, hubspot_property in property_mappings.items():
         if not hubspot_property:
             continue
@@ -3979,7 +4000,10 @@ def find_existing_hubspot_ticket_for_quote(
     quote_id = str(quote.get("id") or "").strip()
     if not quote_id:
         return None
-    property_mappings = normalize_ticket_property_mappings(settings.get("property_mappings") or {})
+    property_mappings = merge_ticket_property_mappings(
+        settings.get("property_mappings"),
+        default_hubspot_settings()["property_mappings"],
+    )
     quote_id_property = str(property_mappings.get("id") or "").strip()
     if not quote_id_property:
         return None
@@ -4699,7 +4723,10 @@ def sync_quote_from_hubspot(conn: sqlite3.Connection, quote_id: str) -> Dict[str
     if not ticket_id:
         raise HTTPException(status_code=400, detail="Quote is not linked to a HubSpot ticket")
 
-    property_mappings = normalize_ticket_property_mappings(settings.get("property_mappings") or {})
+    property_mappings = merge_ticket_property_mappings(
+        settings.get("property_mappings"),
+        default_hubspot_settings()["property_mappings"],
+    )
     requested_properties = ["subject", "hs_pipeline", "hs_pipeline_stage"]
     for local_key in HUBSPOT_SYNC_DETAIL_FIELDS:
         mapped_property = str(property_mappings.get(local_key) or "").strip()
@@ -7146,6 +7173,7 @@ def run_assignment(quote_id: str) -> AssignmentOut:
         )
         conn.commit()
         recompute_needs_action(conn, quote_id)
+        sync_quote_to_hubspot_async(quote_id, create_if_missing=False)
 
     return AssignmentOut(
         id=run_id,
