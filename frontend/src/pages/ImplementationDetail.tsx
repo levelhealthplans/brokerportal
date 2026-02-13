@@ -62,8 +62,21 @@ function parsePandadocDropdownTaskUrl(
     return null;
   }
   const raw = (taskUrl || "").trim();
-  if (!raw || !raw.toLowerCase().startsWith("pandadoc-dropdown://")) {
+  if (!raw) {
     return null;
+  }
+  if (!raw.toLowerCase().startsWith("pandadoc-dropdown://")) {
+    try {
+      const parsed = new URL(raw);
+      if (!parsed.hostname.toLowerCase().includes("pandadoc.com")) {
+        return null;
+      }
+      return {
+        options: [{ url: raw, label: optionLabelFromUrl(raw, 0) }],
+      };
+    } catch {
+      return null;
+    }
   }
   try {
     const parsed = new URL(raw);
@@ -541,23 +554,30 @@ export default function ImplementationDetail() {
                   const optionUrls = pandadocDropdownConfig.options.map((option) => option.url);
                   const selectedUrl =
                     taskLinkSelections[task.id] || optionUrls[0];
+                  const selectedOption =
+                    pandadocDropdownConfig.options.find((option) => option.url === selectedUrl) ||
+                    pandadocDropdownConfig.options[0];
                   return (
                     <>
-                      <select
-                        value={selectedUrl}
-                        onChange={(event) =>
-                          setTaskLinkSelections((prev) => ({
-                            ...prev,
-                            [task.id]: event.target.value,
-                          }))
-                        }
-                      >
-                        {pandadocDropdownConfig.options.map((option, index) => (
-                          <option key={`${task.id}-${option.url}-${index}`} value={option.url}>
-                            {option.label}
-                          </option>
-                        ))}
-                      </select>
+                      {isAdmin ? (
+                        <select
+                          value={selectedUrl}
+                          onChange={(event) =>
+                            setTaskLinkSelections((prev) => ({
+                              ...prev,
+                              [task.id]: event.target.value,
+                            }))
+                          }
+                        >
+                          {pandadocDropdownConfig.options.map((option, index) => (
+                            <option key={`${task.id}-${option.url}-${index}`} value={option.url}>
+                              {option.label}
+                            </option>
+                          ))}
+                        </select>
+                      ) : (
+                        <span className="helper">{selectedOption?.label || "Selected template"}</span>
+                      )}
                       <button
                         className="button secondary"
                         type="button"
