@@ -2911,6 +2911,31 @@ def merge_ticket_property_mappings(
     return merged
 
 
+LEGACY_HUBSPOT_TICKET_PROPERTY_MIGRATIONS: Dict[str, Dict[str, str]] = {
+    "broker_fee_pepm": {
+        "level_health_broker_fee_pepm": "requested_broker_fee__pepm_",
+    },
+    "primary_network": {
+        "level_health_primary_network": "primary_network",
+    },
+    "secondary_network": {
+        "level_health_secondary_network": "secondary_network",
+    },
+    "renewal_comparison": {
+        "level_health_renewal_comparison": "renewal_comparison",
+    },
+}
+
+
+def migrate_legacy_ticket_property_mappings(value: Optional[Dict[str, Any]]) -> Dict[str, str]:
+    mapping = normalize_ticket_property_mappings(value)
+    migrated: Dict[str, str] = {}
+    for local_key, hubspot_property in mapping.items():
+        replacement = LEGACY_HUBSPOT_TICKET_PROPERTY_MIGRATIONS.get(local_key, {}).get(hubspot_property)
+        migrated[local_key] = replacement or hubspot_property
+    return migrated
+
+
 def default_hubspot_settings() -> Dict[str, Any]:
     return {
         "enabled": False,
@@ -2927,10 +2952,10 @@ def default_hubspot_settings() -> Dict[str, Any]:
             "status": "level_health_quote_status",
             "effective_date": "level_health_effective_date",
             "broker_org": "level_health_broker_org",
-            "broker_fee_pepm": "level_health_broker_fee_pepm",
-            "primary_network": "level_health_primary_network",
-            "secondary_network": "level_health_secondary_network",
-            "renewal_comparison": "level_health_renewal_comparison",
+            "broker_fee_pepm": "requested_broker_fee__pepm_",
+            "primary_network": "primary_network",
+            "secondary_network": "secondary_network",
+            "renewal_comparison": "renewal_comparison",
         },
         "quote_status_to_stage": {},
         "stage_to_quote_status": {},
@@ -2954,7 +2979,7 @@ def serialize_hubspot_settings_for_storage(settings: Dict[str, Any]) -> Dict[str
         "ticket_subject_template": str(settings.get("ticket_subject_template") or "").strip(),
         "ticket_content_template": str(settings.get("ticket_content_template") or "").strip(),
         "property_mappings": merge_ticket_property_mappings(
-            settings.get("property_mappings"),
+            migrate_legacy_ticket_property_mappings(settings.get("property_mappings")),
             default_hubspot_settings()["property_mappings"],
         ),
         "quote_status_to_stage": normalize_mapping_dict(settings.get("quote_status_to_stage")),
@@ -3088,6 +3113,15 @@ def read_hubspot_settings(*, include_token: bool = False) -> Dict[str, Any]:
                 persist_hubspot_settings(raw)
             except Exception:
                 pass
+    raw_property_mappings = normalize_ticket_property_mappings(raw.get("property_mappings"))
+    migrated_property_mappings = migrate_legacy_ticket_property_mappings(raw.get("property_mappings"))
+    if raw and migrated_property_mappings != raw_property_mappings:
+        raw = dict(raw)
+        raw["property_mappings"] = migrated_property_mappings
+        try:
+            persist_hubspot_settings(raw)
+        except Exception:
+            pass
 
     private_token = str(raw.get("private_app_token") or defaults["private_app_token"]).strip()
     oauth_access_token = str(raw.get("oauth_access_token") or defaults["oauth_access_token"]).strip()
@@ -3112,7 +3146,7 @@ def read_hubspot_settings(*, include_token: bool = False) -> Dict[str, Any]:
         ).strip()
         or defaults["ticket_content_template"],
         "property_mappings": merge_ticket_property_mappings(
-            raw.get("property_mappings"),
+            migrated_property_mappings,
             defaults["property_mappings"],
         ),
         "quote_status_to_stage": normalize_mapping_dict(raw.get("quote_status_to_stage")),
@@ -3159,9 +3193,11 @@ def write_hubspot_settings(
         ).strip()
         or current["ticket_content_template"],
         "property_mappings": merge_ticket_property_mappings(
-            payload.property_mappings
-            if payload.property_mappings is not None
-            else current["property_mappings"],
+            migrate_legacy_ticket_property_mappings(
+                payload.property_mappings
+                if payload.property_mappings is not None
+                else current["property_mappings"]
+            ),
             default_hubspot_settings()["property_mappings"],
         ),
         "quote_status_to_stage": normalize_mapping_dict(

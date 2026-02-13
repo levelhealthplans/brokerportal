@@ -61,19 +61,19 @@ class HubspotSettingsStorageTests(unittest.TestCase):
         self.assertEqual(loaded["property_mappings"]["company"], "level_health_company_cached")
         self.assertEqual(
             loaded["property_mappings"]["primary_network"],
-            "level_health_primary_network",
+            "primary_network",
         )
         self.assertEqual(
             loaded["property_mappings"]["secondary_network"],
-            "level_health_secondary_network",
+            "secondary_network",
         )
         self.assertEqual(
             loaded["property_mappings"]["renewal_comparison"],
-            "level_health_renewal_comparison",
+            "renewal_comparison",
         )
         self.assertEqual(
             loaded["property_mappings"]["broker_fee_pepm"],
-            "level_health_broker_fee_pepm",
+            "requested_broker_fee__pepm_",
         )
         self.assertEqual(loaded["oauth_hub_id"], "7106327")
         self.assertTrue(loaded["oauth_connected"])
@@ -99,21 +99,57 @@ class HubspotSettingsStorageTests(unittest.TestCase):
         self.assertEqual(stored["property_mappings"]["company"], "level_health_company_cached")
         self.assertEqual(
             stored["property_mappings"]["primary_network"],
-            "level_health_primary_network",
+            "primary_network",
         )
         self.assertEqual(
             stored["property_mappings"]["secondary_network"],
-            "level_health_secondary_network",
+            "secondary_network",
         )
         self.assertEqual(
             stored["property_mappings"]["renewal_comparison"],
-            "level_health_renewal_comparison",
+            "renewal_comparison",
         )
         self.assertEqual(
             stored["property_mappings"]["broker_fee_pepm"],
-            "level_health_broker_fee_pepm",
+            "requested_broker_fee__pepm_",
         )
         self.assertEqual(stored["quote_status_to_stage"]["Draft"], "101")
+
+    def test_read_hubspot_settings_migrates_legacy_property_names(self) -> None:
+        legacy_payload = {
+            "enabled": True,
+            "portal_id": "7106327",
+            "pipeline_id": "98238573",
+            "sync_quote_to_hubspot": True,
+            "sync_hubspot_to_quote": True,
+            "property_mappings": {
+                "broker_fee_pepm": "level_health_broker_fee_pepm",
+                "primary_network": "level_health_primary_network",
+                "secondary_network": "level_health_secondary_network",
+                "renewal_comparison": "level_health_renewal_comparison",
+            },
+        }
+        self.settings_path.parent.mkdir(parents=True, exist_ok=True)
+        self.settings_path.write_text(json.dumps(legacy_payload), encoding="utf-8")
+
+        loaded = main.read_hubspot_settings(include_token=True)
+
+        self.assertEqual(
+            loaded["property_mappings"]["broker_fee_pepm"],
+            "requested_broker_fee__pepm_",
+        )
+        self.assertEqual(loaded["property_mappings"]["primary_network"], "primary_network")
+        self.assertEqual(loaded["property_mappings"]["secondary_network"], "secondary_network")
+        self.assertEqual(loaded["property_mappings"]["renewal_comparison"], "renewal_comparison")
+
+        stored = json.loads(self.settings_path.read_text(encoding="utf-8"))
+        self.assertEqual(
+            stored["property_mappings"]["broker_fee_pepm"],
+            "requested_broker_fee__pepm_",
+        )
+        self.assertEqual(stored["property_mappings"]["primary_network"], "primary_network")
+        self.assertEqual(stored["property_mappings"]["secondary_network"], "secondary_network")
+        self.assertEqual(stored["property_mappings"]["renewal_comparison"], "renewal_comparison")
 
 
 if __name__ == "__main__":
