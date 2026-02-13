@@ -150,6 +150,38 @@ class InstallationRegressionTests(unittest.TestCase):
             self.assertIsNotNone(row)
             self.assertEqual(row["task_url"], form_url)
 
+    def test_convert_to_installation_sets_implementation_forms_popup_url(self) -> None:
+        quote = self._create_quote()
+        with patch.dict(
+            main.os.environ,
+            {
+                "HUBSPOT_IMPLEMENTATION_FORM_URL": "",
+                "HUBSPOT_IMPLEMENTATION_FORM_PORTAL_ID": "7106327",
+                "HUBSPOT_IMPLEMENTATION_FORM_ID": "f215c8d6-451d-4b7b-826f-fdab43b80369",
+                "HUBSPOT_IMPLEMENTATION_FORM_REGION": "na1",
+            },
+            clear=False,
+        ):
+            installation = self._create_installation(quote.id)
+
+        with main.get_db() as conn:
+            cur = conn.cursor()
+            cur.execute(
+                """
+                SELECT task_url
+                FROM Task
+                WHERE installation_id = ? AND title = ?
+                LIMIT 1
+                """,
+                (installation.id, "Implementation Forms"),
+            )
+            row = cur.fetchone()
+            self.assertIsNotNone(row)
+            self.assertEqual(
+                row["task_url"],
+                "hubspot-form://popup?portal_id=7106327&form_id=f215c8d6-451d-4b7b-826f-fdab43b80369&region=na1",
+            )
+
     def test_backfill_installation_orgs_syncs_stale_values(self) -> None:
         quote = self._create_quote()
         installation = self._create_installation(quote.id)

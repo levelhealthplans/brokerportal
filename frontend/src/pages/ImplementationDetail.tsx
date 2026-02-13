@@ -13,6 +13,72 @@ import {
 import { useAccess } from "../access";
 import { useAutoDismissMessage } from "../hooks/useAutoDismissMessage";
 
+type HubspotTaskFormConfig = {
+  portalId: string;
+  formId: string;
+  region: string;
+};
+
+function parseHubspotFormTaskUrl(taskTitle: string, taskUrl: string | null | undefined): HubspotTaskFormConfig | null {
+  if ((taskTitle || "").trim().toLowerCase() !== "implementation forms") {
+    return null;
+  }
+  const raw = (taskUrl || "").trim();
+  if (!raw || !raw.toLowerCase().startsWith("hubspot-form://")) {
+    return null;
+  }
+  try {
+    const parsed = new URL(raw);
+    const portalId = (parsed.searchParams.get("portal_id") || "").trim();
+    const formId = (parsed.searchParams.get("form_id") || "").trim();
+    const region = (parsed.searchParams.get("region") || "na1").trim() || "na1";
+    if (!portalId || !formId) {
+      return null;
+    }
+    return { portalId, formId, region };
+  } catch {
+    return null;
+  }
+}
+
+function loadHubspotFormsScript(portalId: string): Promise<void> {
+  const scriptId = `hubspot-forms-embed-${portalId}`;
+  const scriptUrl = `https://js.hsforms.net/forms/embed/developer/${encodeURIComponent(portalId)}.js`;
+  const existing = document.getElementById(scriptId) as HTMLScriptElement | null;
+  if (existing) {
+    return new Promise((resolve, reject) => {
+      const currentWindow = window as Window & {
+        hbspt?: { forms?: { create?: (config: Record<string, unknown>) => void } };
+      };
+      if (currentWindow.hbspt?.forms?.create) {
+        resolve();
+        return;
+      }
+      existing.addEventListener("load", () => resolve(), { once: true });
+      existing.addEventListener(
+        "error",
+        () => reject(new Error("Failed to load HubSpot form embed script.")),
+        { once: true }
+      );
+    });
+  }
+
+  return new Promise((resolve, reject) => {
+    const script = document.createElement("script");
+    script.id = scriptId;
+    script.src = scriptUrl;
+    script.defer = true;
+    script.async = true;
+    script.addEventListener("load", () => resolve(), { once: true });
+    script.addEventListener(
+      "error",
+      () => reject(new Error("Failed to load HubSpot form embed script.")),
+      { once: true }
+    );
+    document.body.appendChild(script);
+  });
+}
+
 export default function ImplementationDetail() {
   const { id } = useParams();
   const navigate = useNavigate();
@@ -23,6 +89,8 @@ export default function ImplementationDetail() {
   const [busy, setBusy] = useState(false);
   const [userNameById, setUserNameById] = useState<Record<string, string>>({});
   const [taskUrlDrafts, setTaskUrlDrafts] = useState<Record<string, string>>({});
+  const [activeHubspotForm, setActiveHubspotForm] = useState<HubspotTaskFormConfig | null>(null);
+  const [hubspotFormError, setHubspotFormError] = useState<string | null>(null);
   const statusMessageFading = useAutoDismissMessage(statusMessage, setStatusMessage, 5000, 500);
   const { role, email } = useAccess();
   const isAdmin = role === "admin";
@@ -165,6 +233,50 @@ export default function ImplementationDetail() {
     }
   };
 
+  useEffect(() => {
+    if (!activeHubspotForm) {
+      return;
+    }
+    let cancelled = false;
+    setHubspotFormError(null);
+
+    const renderForm = async () => {
+      try {
+        await loadHubspotFormsScript(activeHubspotForm.portalId);
+        if (cancelled) return;
+        const container = document.getElementById("implementation-hubspot-form-container");
+        if (!container) return;
+        container.innerHTML = "";
+
+        const currentWindow = window as Window & {
+          hbspt?: { forms?: { create?: (config: Record<string, unknown>) => void } };
+        };
+        const createForm = currentWindow.hbspt?.forms?.create;
+        if (!createForm) {
+          throw new Error("HubSpot forms library is unavailable.");
+        }
+        createForm({
+          region: activeHubspotForm.region,
+          portalId: activeHubspotForm.portalId,
+          formId: activeHubspotForm.formId,
+          target: "#implementation-hubspot-form-container",
+        });
+      } catch (err: any) {
+        if (cancelled) return;
+        setHubspotFormError(err?.message || "Unable to load HubSpot form.");
+      }
+    };
+
+    void renderForm();
+    return () => {
+      cancelled = true;
+      const container = document.getElementById("implementation-hubspot-form-container");
+      if (container) {
+        container.innerHTML = "";
+      }
+    };
+  }, [activeHubspotForm]);
+
   if (!data) {
     return <div className="section">Loading implementation...</div>;
   }
@@ -224,20 +336,37 @@ export default function ImplementationDetail() {
               </div>
             </div>
             <div className="task-actions">
-              {task.task_url ? (
-                <a
-                  className="button secondary"
-                  href={task.task_url}
-                  target="_blank"
-                  rel="noreferrer"
-                >
-                  Open Link
-                </a>
-              ) : (
-                <button className="button ghost" disabled>
-                  No Link
-                </button>
-              )}
+              {(() => {
+                const hubspotFormConfig = parseHubspotFormTaskUrl(task.title, task.task_url);
+                if (hubspotFormConfig) {
+                  return (
+                    <button
+                      className="button secondary"
+                      type="button"
+                      onClick={() => setActiveHubspotForm(hubspotFormConfig)}
+                    >
+                      Open Form
+                    </button>
+                  );
+                }
+                if (task.task_url) {
+                  return (
+                    <a
+                      className="button secondary"
+                      href={task.task_url}
+                      target="_blank"
+                      rel="noreferrer"
+                    >
+                      Open Link
+                    </a>
+                  );
+                }
+                return (
+                  <button className="button ghost" disabled>
+                    No Link
+                  </button>
+                );
+              })()}
               {isAdmin && (
                 <>
                   <select
@@ -272,6 +401,31 @@ export default function ImplementationDetail() {
           </div>
         ))}
       </section>
+
+      {activeHubspotForm && (
+        <div className="modal-backdrop" onClick={() => setActiveHubspotForm(null)}>
+          <div
+            className="modal hubspot-form-modal"
+            onClick={(event) => event.stopPropagation()}
+          >
+            <div className="modal-header">
+              <h3>Implementation Form</h3>
+              <button
+                className="button subtle"
+                type="button"
+                onClick={() => setActiveHubspotForm(null)}
+              >
+                Close
+              </button>
+            </div>
+            {hubspotFormError && <div className="notice">{hubspotFormError}</div>}
+            <div
+              id="implementation-hubspot-form-container"
+              className="hubspot-form-container"
+            />
+          </div>
+        </div>
+      )}
 
       <section className="section">
         <h2>Documents</h2>

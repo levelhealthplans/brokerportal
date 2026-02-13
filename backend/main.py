@@ -283,11 +283,51 @@ def normalize_task_state(state: Optional[str]) -> Optional[str]:
     return TASK_STATE_CANONICAL.get(key)
 
 
+def build_hubspot_form_popup_task_url(
+    *,
+    portal_id: str,
+    form_id: str,
+    region: str,
+) -> Optional[str]:
+    portal = str(portal_id or "").strip()
+    form = str(form_id or "").strip()
+    form_region = str(region or "").strip() or "na1"
+    if not portal or not form:
+        return None
+    query = urlparse.urlencode(
+        {
+            "portal_id": portal,
+            "form_id": form,
+            "region": form_region,
+        }
+    )
+    return f"hubspot-form://popup?{query}"
+
+
 def default_installation_task_url(title: str) -> Optional[str]:
     normalized_title = (title or "").strip().lower()
     if normalized_title == "implementation forms":
         url = (os.getenv("HUBSPOT_IMPLEMENTATION_FORM_URL", "") or "").strip()
-        return url or None
+        if url:
+            return url
+        portal_id = (
+            os.getenv("HUBSPOT_IMPLEMENTATION_FORM_PORTAL_ID", "7106327")
+            or "7106327"
+        ).strip()
+        form_id = (
+            os.getenv(
+                "HUBSPOT_IMPLEMENTATION_FORM_ID",
+                "f215c8d6-451d-4b7b-826f-fdab43b80369",
+            )
+            or "f215c8d6-451d-4b7b-826f-fdab43b80369"
+        ).strip()
+        region = (os.getenv("HUBSPOT_IMPLEMENTATION_FORM_REGION", "na1") or "na1").strip()
+        popup_url = build_hubspot_form_popup_task_url(
+            portal_id=portal_id,
+            form_id=form_id,
+            region=region,
+        )
+        return popup_url
     return None
 
 
