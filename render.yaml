@@ -22,6 +22,8 @@ services:
         value: "true"
       - key: SESSION_COOKIE_SAMESITE
         value: "lax"
+      - key: PANDADOC_API_KEY
+        value: 5ab30f118049d93e7e81513fbd11425817ce0799
     disk:
       name: level-health-data
       mountPath: /var/data
