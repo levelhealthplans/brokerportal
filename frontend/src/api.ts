@@ -202,6 +202,12 @@ export type InstallationRegressResponse = {
   quote_status: string;
 };
 
+export type StoplossDisclosureLaunchResponse = {
+  status: string;
+  open_url: string;
+  created_via_api: boolean;
+};
+
 export type Organization = {
   id: string;
   name: string;
@@ -896,6 +902,25 @@ export function completeImplementationFormTask(
       access
     ),
     { method: "POST" }
+  );
+}
+
+export function launchStoplossDisclosureTask(
+  installationId: string,
+  taskId: string,
+  selectedUrl: string,
+  access?: AccessParams
+) {
+  return request<StoplossDisclosureLaunchResponse>(
+    withAccessParams(
+      `/installations/${installationId}/tasks/${taskId}/launch-stoploss-disclosure`,
+      access
+    ),
+    {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ selected_url: selectedUrl }),
+    }
   );
 }
 

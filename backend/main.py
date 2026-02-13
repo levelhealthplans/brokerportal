@@ -384,6 +384,227 @@ def build_pandadoc_dropdown_task_url(urls: List[str]) -> Optional[str]:
     return build_pandadoc_dropdown_task_url_with_labels([(None, url) for url in urls])
 
 
+def parse_pandadoc_dropdown_task_options(task_url: Optional[str]) -> List[tuple[Optional[str], str]]:
+    raw = str(task_url or "").strip()
+    if not raw:
+        return []
+    if raw.lower().startswith("pandadoc-dropdown://"):
+        try:
+            parsed = urlparse.urlparse(raw)
+            search_params = urlparse.parse_qs(parsed.query, keep_blank_values=False)
+            option_urls = [
+                str(value or "").strip()
+                for value in search_params.get("url", [])
+                if str(value or "").strip()
+            ]
+            labels = [str(value or "").strip() for value in search_params.get("label", [])]
+            options: List[tuple[Optional[str], str]] = []
+            seen_urls: set[str] = set()
+            for index, option_url in enumerate(option_urls):
+                if option_url in seen_urls:
+                    continue
+                label = labels[index] if index < len(labels) else None
+                options.append((label or None, option_url))
+                seen_urls.add(option_url)
+            return options
+        except Exception:
+            return []
+    return [(None, raw)]
+
+
+def parse_pandadoc_app_target(url: str) -> Optional[Dict[str, Any]]:
+    raw = str(url or "").strip()
+    if not raw:
+        return None
+    try:
+        parsed = urlparse.urlparse(raw)
+    except Exception:
+        return None
+    host = str(parsed.netloc or "").strip().lower()
+    if "pandadoc.com" not in host:
+        return None
+    fragment = str(parsed.fragment or "").strip()
+    fragment_path = ""
+    fragment_query = ""
+    if fragment:
+        fragment_path, _, fragment_query = fragment.partition("?")
+    path_to_parse = fragment_path or parsed.path
+    segments = [segment for segment in path_to_parse.strip("/").split("/") if segment]
+    if segments and segments[0] == "a":
+        segments = segments[1:]
+    if len(segments) < 2:
+        return None
+    object_type = segments[0].strip().lower()
+    object_id = segments[1].strip()
+    if object_type not in {"templates", "documents"} or not object_id:
+        return None
+    query_map = urlparse.parse_qs(fragment_query or parsed.query, keep_blank_values=False)
+    new_raw = (query_map.get("new") or [""])[0]
+    new_flag = str(new_raw or "").strip().lower() in {"1", "true", "yes", "on"}
+    return {
+        "type": object_type,
+        "id": object_id,
+        "new": new_flag,
+        "url": raw,
+    }
+
+
+def sanitize_pandadoc_document_name(value: str) -> str:
+    cleaned = re.sub(r"\s+", " ", str(value or "").strip())
+    if not cleaned:
+        cleaned = "Stoploss Disclosure"
+    return cleaned[:120]
+
+
+def pandadoc_api_request(
+    token: str,
+    method: str,
+    path: str,
+    *,
+    body: Optional[Dict[str, Any]] = None,
+) -> Dict[str, Any]:
+    normalized_token = str(token or "").strip()
+    if not normalized_token:
+        raise HTTPException(status_code=500, detail="PandaDoc token is not configured")
+    normalized_path = str(path or "").strip()
+    if not normalized_path:
+        raise HTTPException(status_code=500, detail="PandaDoc path is required")
+    if normalized_path.startswith("http://") or normalized_path.startswith("https://"):
+        url = normalized_path
+    else:
+        if not normalized_path.startswith("/"):
+            normalized_path = f"/{normalized_path}"
+        url = f"https://api.pandadoc.com/public/v1{normalized_path}"
+
+    headers = {"Authorization": f"API-Key {normalized_token}"}
+    data: Optional[bytes] = None
+    if body is not None:
+        data = json.dumps(body).encode("utf-8")
+        headers["Content-Type"] = "application/json"
+
+    req = urlrequest.Request(
+        url,
+        method=str(method or "GET").upper(),
+        data=data,
+        headers=headers,
+    )
+    try:
+        with urlrequest.urlopen(req, timeout=20) as resp:
+            payload = resp.read()
+            if not payload:
+                return {}
+            try:
+                parsed = json.loads(payload.decode("utf-8"))
+            except Exception:
+                return {}
+            return parsed if isinstance(parsed, dict) else {}
+    except urlerror.HTTPError as exc:
+        raw_error = exc.read().decode("utf-8", errors="ignore")
+        detail = f"PandaDoc API request failed ({exc.code})"
+        if raw_error.strip():
+            detail = f"{detail}: {raw_error.strip()}"
+        raise HTTPException(status_code=502, detail=detail)
+    except HTTPException:
+        raise
+    except Exception as exc:
+        raise HTTPException(status_code=502, detail=f"PandaDoc API request failed: {exc}")
+
+
+def get_task_assigned_user(conn: sqlite3.Connection, task: sqlite3.Row) -> Optional[sqlite3.Row]:
+    assigned_user_id = str(task["assigned_user_id"] or "").strip()
+    if not assigned_user_id:
+        return None
+    cur = conn.cursor()
+    cur.execute("SELECT * FROM User WHERE id = ?", (assigned_user_id,))
+    return cur.fetchone()
+
+
+def resolve_stoploss_sponsor_user(
+    conn: sqlite3.Connection,
+    *,
+    installation: sqlite3.Row,
+    task: sqlite3.Row,
+) -> Optional[sqlite3.Row]:
+    assigned_user = get_task_assigned_user(conn, task)
+    if assigned_user:
+        return assigned_user
+    sponsor_domain = str(installation["sponsor_domain"] or "").strip().lower()
+    fallback_user_id = find_sponsor_user_id_for_domain(conn, sponsor_domain)
+    if not fallback_user_id:
+        return None
+    cur = conn.cursor()
+    cur.execute("SELECT * FROM User WHERE id = ?", (fallback_user_id,))
+    return cur.fetchone()
+
+
+def create_stoploss_disclosure_document_from_template(
+    conn: sqlite3.Connection,
+    *,
+    installation: sqlite3.Row,
+    task: sqlite3.Row,
+    template_id: str,
+    option_label: Optional[str],
+) -> str:
+    token = (
+        os.getenv("PANDADOC_API_KEY", "").strip()
+        or os.getenv("PANDADOC_API_TOKEN", "").strip()
+    )
+    if not token:
+        raise HTTPException(
+            status_code=503,
+            detail="PandaDoc API key is not configured (set PANDADOC_API_KEY)",
+        )
+
+    recipient_user = resolve_stoploss_sponsor_user(conn, installation=installation, task=task)
+    recipient_email = (
+        str(recipient_user["email"] or "").strip().lower()
+        if recipient_user
+        else ""
+    )
+    if not recipient_email:
+        raise HTTPException(
+            status_code=400,
+            detail="Stoploss Disclosure requires an assigned Plan Sponsor with an email address",
+        )
+    first_name = (
+        str(recipient_user["first_name"] or "").strip()
+        if recipient_user
+        else ""
+    ) or "Plan"
+    last_name = (
+        str(recipient_user["last_name"] or "").strip()
+        if recipient_user
+        else ""
+    ) or "Sponsor"
+    document_name = sanitize_pandadoc_document_name(
+        f'{installation["company"] or "Client"} - Stoploss Disclosure'
+        + (f" - {option_label}" if option_label else "")
+    )
+    recipient_payload: Dict[str, Any] = {
+        "email": recipient_email,
+        "first_name": first_name,
+        "last_name": last_name,
+    }
+    role_name = (os.getenv("PANDADOC_STOPLOSS_DISCLOSURE_RECIPIENT_ROLE", "") or "").strip()
+    if role_name:
+        recipient_payload["role"] = role_name
+    payload: Dict[str, Any] = {
+        "name": document_name,
+        "template_uuid": str(template_id or "").strip(),
+        "recipients": [recipient_payload],
+    }
+    created = pandadoc_api_request(
+        token,
+        "POST",
+        "/documents",
+        body=payload,
+    )
+    document_id = str(created.get("id") or "").strip()
+    if not document_id:
+        raise HTTPException(status_code=502, detail="PandaDoc document creation returned no id")
+    return f"https://app.pandadoc.com/a/#/documents/{document_id}"
+
+
 def resolve_stoploss_disclosure_options() -> List[tuple[Optional[str], str]]:
     labeled_options = parse_labeled_url_list(
         os.getenv("PANDADOC_STOPLOSS_DISCLOSURE_OPTIONS", "")
@@ -1487,6 +1708,16 @@ class TaskUpdateIn(BaseModel):
     task_url: Optional[str] = None
     due_date: Optional[str] = None
     assigned_user_id: Optional[str] = None
+
+
+class StoplossDisclosureLaunchIn(BaseModel):
+    selected_url: str
+
+
+class StoplossDisclosureLaunchOut(BaseModel):
+    status: str
+    open_url: str
+    created_via_api: bool
 
 
 class TaskListOut(TaskOut):
@@ -7160,6 +7391,76 @@ def complete_implementation_forms_task(
         if not updated:
             raise HTTPException(status_code=404, detail="Task not found")
     return TaskOut(**dict(updated))
+
+
+@app.post(
+    "/api/installations/{installation_id}/tasks/{task_id}/launch-stoploss-disclosure",
+    response_model=StoplossDisclosureLaunchOut,
+)
+def launch_stoploss_disclosure_task(
+    installation_id: str,
+    task_id: str,
+    payload: StoplossDisclosureLaunchIn,
+    request: Request,
+    role: Optional[str] = None,
+    email: Optional[str] = None,
+) -> StoplossDisclosureLaunchOut:
+    selected_url = str(payload.selected_url or "").strip()
+    if not selected_url:
+        raise HTTPException(status_code=400, detail="selected_url is required")
+
+    with get_db() as conn:
+        installation, _, _ = require_installation_access(
+            conn, installation_id, request, role, email
+        )
+        cur = conn.cursor()
+        cur.execute(
+            "SELECT * FROM Task WHERE id = ? AND installation_id = ?",
+            (task_id, installation_id),
+        )
+        task = cur.fetchone()
+        if not task:
+            raise HTTPException(status_code=404, detail="Task not found")
+        if str(task["title"] or "").strip().lower() != "stoploss disclosure":
+            raise HTTPException(
+                status_code=400,
+                detail="Only Stoploss Disclosure can use this launch action",
+            )
+
+        options = parse_pandadoc_dropdown_task_options(task["task_url"])
+        allowed_map = {option_url: label for label, option_url in options}
+        if allowed_map and selected_url not in allowed_map:
+            raise HTTPException(
+                status_code=400,
+                detail="selected_url is not allowed for this task",
+            )
+
+        target = parse_pandadoc_app_target(selected_url)
+        if not target:
+            raise HTTPException(
+                status_code=400,
+                detail="selected_url must be a PandaDoc template or document URL",
+            )
+
+        if target["type"] == "templates":
+            open_url = create_stoploss_disclosure_document_from_template(
+                conn,
+                installation=installation,
+                task=task,
+                template_id=target["id"],
+                option_label=allowed_map.get(selected_url),
+            )
+            return StoplossDisclosureLaunchOut(
+                status="created",
+                open_url=open_url,
+                created_via_api=True,
+            )
+
+        return StoplossDisclosureLaunchOut(
+            status="opened",
+            open_url=selected_url,
+            created_via_api=False,
+        )
 
 
 @app.patch("/api/installations/{installation_id}/tasks/{task_id}", response_model=TaskOut)

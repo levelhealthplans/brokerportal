@@ -436,6 +436,100 @@ class InstallationRegressionTests(unittest.TestCase):
                 )
         self.assertEqual(exc.exception.status_code, 400)
 
+    def test_launch_stoploss_disclosure_creates_document_from_template(self) -> None:
+        quote = self._create_quote()
+        sponsor_user_id = self._create_sponsor_user(
+            email="owner@regression.example.com",
+            organization="regression.example.com",
+        )
+        installation = self._create_installation(quote.id)
+
+        with main.get_db() as conn:
+            cur = conn.cursor()
+            cur.execute(
+                """
+                SELECT id, task_url, assigned_user_id
+                FROM Task
+                WHERE installation_id = ? AND title = ?
+                LIMIT 1
+                """,
+                (installation.id, "Stoploss Disclosure"),
+            )
+            task = cur.fetchone()
+            self.assertIsNotNone(task)
+            task_id = task["id"]
+            self.assertEqual(task["assigned_user_id"], sponsor_user_id)
+            task_url = str(task["task_url"] or "")
+            options = main.parse_pandadoc_dropdown_task_options(task_url)
+            self.assertGreaterEqual(len(options), 1)
+            selected_url = options[0][1]
+
+        with patch.dict(main.os.environ, {"PANDADOC_API_KEY": "test-key"}, clear=False), patch.object(
+            main, "resolve_access_scope", return_value=("sponsor", "owner@regression.example.com")
+        ), patch.object(main, "pandadoc_api_request", return_value={"id": "doc-123"}) as mocked_api:
+            launched = main.launch_stoploss_disclosure_task(
+                installation.id,
+                task_id,
+                main.StoplossDisclosureLaunchIn(selected_url=selected_url),
+                request=object(),
+            )
+
+        self.assertEqual(launched.status, "created")
+        self.assertTrue(launched.created_via_api)
+        self.assertEqual(launched.open_url, "https://app.pandadoc.com/a/#/documents/doc-123")
+        mocked_api.assert_called_once()
+
+    def test_launch_stoploss_disclosure_opens_document_new_link_without_api(self) -> None:
+        quote = self._create_quote()
+        self._create_sponsor_user(
+            email="owner@regression.example.com",
+            organization="regression.example.com",
+        )
+        with patch.dict(
+            main.os.environ,
+            {
+                "PANDADOC_STOPLOSS_DISCLOSURE_OPTIONS": (
+                    "Ryan Specialty|https://app.pandadoc.com/a/#/documents/"
+                    "MXBYyGs4H4ERZRrfjqxatN?new=true"
+                ),
+                "PANDADOC_STOPLOSS_DISCLOSURE_URLS": "",
+                "PANDADOC_STOPLOSS_DISCLOSURE_URL": "",
+            },
+            clear=False,
+        ):
+            installation = self._create_installation(quote.id)
+
+        with main.get_db() as conn:
+            cur = conn.cursor()
+            cur.execute(
+                """
+                SELECT id, task_url
+                FROM Task
+                WHERE installation_id = ? AND title = ?
+                LIMIT 1
+                """,
+                (installation.id, "Stoploss Disclosure"),
+            )
+            task = cur.fetchone()
+            self.assertIsNotNone(task)
+            task_id = task["id"]
+            selected_url = str(task["task_url"] or "")
+
+        with patch.object(
+            main, "resolve_access_scope", return_value=("sponsor", "owner@regression.example.com")
+        ), patch.object(main, "pandadoc_api_request") as mocked_api:
+            launched = main.launch_stoploss_disclosure_task(
+                installation.id,
+                task_id,
+                main.StoplossDisclosureLaunchIn(selected_url=selected_url),
+                request=object(),
+            )
+
+        self.assertEqual(launched.status, "opened")
+        self.assertFalse(launched.created_via_api)
+        self.assertEqual(launched.open_url, selected_url)
+        mocked_api.assert_not_called()
+
     def test_delete_installation_removes_tasks_and_docs(self) -> None:
         quote = self._create_quote()
         installation = self._create_installation(quote.id)

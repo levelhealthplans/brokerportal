@@ -6,6 +6,7 @@ import {
   deleteInstallationDocument,
   getInstallation,
   getUsers,
+  launchStoplossDisclosureTask,
   regressImplementationToQuote,
   uploadInstallationDocument,
   InstallationDetail,
@@ -239,6 +240,40 @@ export default function ImplementationDetail() {
       );
       setStatusMessage("Task link updated.");
       refresh();
+    } catch (err: any) {
+      setError(err.message);
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  const handleLaunchStoplossDisclosure = async (
+    taskId: string,
+    selectedUrl: string
+  ) => {
+    const target = (selectedUrl || "").trim();
+    if (!target) {
+      setError("Please select a Stoploss Disclosure option.");
+      return;
+    }
+    setBusy(true);
+    setError(null);
+    try {
+      const launched = await launchStoplossDisclosureTask(
+        installationId,
+        taskId,
+        target,
+        { role, email }
+      );
+      const openUrl = (launched.open_url || target).trim();
+      if (openUrl) {
+        window.open(openUrl, "_blank", "noopener,noreferrer");
+      }
+      setStatusMessage(
+        launched.created_via_api
+          ? "Stoploss disclosure document created."
+          : "Stoploss disclosure opened."
+      );
     } catch (err: any) {
       setError(err.message);
     } finally {
@@ -523,14 +558,16 @@ export default function ImplementationDetail() {
                           </option>
                         ))}
                       </select>
-                      <a
+                      <button
                         className="button secondary"
-                        href={selectedUrl}
-                        target="_blank"
-                        rel="noreferrer"
+                        type="button"
+                        onClick={() =>
+                          handleLaunchStoplossDisclosure(task.id, selectedUrl)
+                        }
+                        disabled={busy}
                       >
-                        Open Link
-                      </a>
+                        Create & Open
+                      </button>
                     </>
                   );
                 }
