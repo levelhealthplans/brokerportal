@@ -18,6 +18,21 @@ type DetailState = {
   detail?: QuoteDetail;
 };
 
+type AssignmentGroupSummary = NonNullable<
+  QuoteDetail["assignments"][number]["result_json"]["group_summary"]
+>;
+
+function formatEffectiveCoverageRate(summary?: AssignmentGroupSummary | null): string {
+  if (!summary) return "—";
+  if (summary.fallback_used) return "100% (fallback)";
+  return `${Math.round(summary.coverage_percentage * 100)}%`;
+}
+
+function formatDirectCoverageRate(summary?: AssignmentGroupSummary | null): string {
+  if (!summary) return "—";
+  return `${Math.round(summary.coverage_percentage * 100)}%`;
+}
+
 export default function NetworkAssignments() {
   const { role, email } = useAccess();
   const [quotes, setQuotes] = useState<Quote[]>([]);
@@ -139,9 +154,12 @@ export default function NetworkAssignments() {
                     ? formatNetworkLabel(quote.latest_assignment.recommendation)
                     : "No network assigned";
               const computedMatchRate = groupSummary
-                ? `${Math.round(groupSummary.coverage_percentage * 100)}%`
+                ? formatEffectiveCoverageRate(groupSummary)
                 : quote.latest_assignment
-                  ? `${Math.round(quote.latest_assignment.confidence * 100)}%`
+                  ? quote.latest_assignment.recommendation === "Cigna_PPO" &&
+                    quote.latest_assignment.confidence < 0.9
+                    ? "100% (fallback)"
+                    : `${Math.round(quote.latest_assignment.confidence * 100)}%`
                   : "—";
 
               return (
@@ -343,7 +361,13 @@ function AssignmentDetails({
               : formatNetworkLabel(groupSummary.primary_network)}
           </span>
           <strong>Coverage Rate</strong>
-          <span>{Math.round(groupSummary.coverage_percentage * 100)}%</span>
+          <span>{formatEffectiveCoverageRate(groupSummary)}</span>
+          {groupSummary.fallback_used && (
+            <>
+              <strong>Direct Contract Match</strong>
+              <span>{formatDirectCoverageRate(groupSummary)}</span>
+            </>
+          )}
           <strong>Members Counted</strong>
           <span>{groupSummary.total_members}</span>
         </div>
@@ -351,13 +375,17 @@ function AssignmentDetails({
 
       {Object.keys(coverageByNetwork).length > 0 && (
         <>
-          <h3 style={{ marginTop: 8 }}>Network Match Rates</h3>
+          <h3 style={{ marginTop: 8 }}>
+            {groupSummary?.fallback_used
+              ? "Direct Contract Match Rates"
+              : "Network Match Rates"}
+          </h3>
           <div className="table-scroll">
             <table className="table slim">
               <thead>
                 <tr>
                   <th>Network</th>
-                  <th>Match Rate</th>
+                  <th>{groupSummary?.fallback_used ? "Direct Match Rate" : "Match Rate"}</th>
                 </tr>
               </thead>
               <tbody>

@@ -23,6 +23,21 @@ import { formatNetworkLabel } from "../utils/formatNetwork";
 import { getQuoteStageClass, getQuoteStageLabel } from "../utils/quoteStatus";
 import { useAutoDismissMessage } from "../hooks/useAutoDismissMessage";
 
+type AssignmentGroupSummary = NonNullable<
+  QuoteDetailType["assignments"][number]["result_json"]["group_summary"]
+>;
+
+function formatEffectiveCoverageRate(summary?: AssignmentGroupSummary | null): string {
+  if (!summary) return "—";
+  if (summary.fallback_used) return "100% (fallback)";
+  return `${Math.round(summary.coverage_percentage * 100)}%`;
+}
+
+function formatDirectCoverageRate(summary?: AssignmentGroupSummary | null): string {
+  if (!summary) return "—";
+  return `${Math.round(summary.coverage_percentage * 100)}%`;
+}
+
 export default function QuoteDetail() {
   const { id } = useParams();
   const quoteId = id || "";
@@ -358,6 +373,7 @@ export default function QuoteDetail() {
     if (!data?.standardizations.length) return null;
     return data.standardizations[0];
   }, [data]);
+  const latestGroupSummary = latestAssignment?.result_json.group_summary || null;
 
   const coverageRows = useMemo(
     () =>
@@ -1466,15 +1482,18 @@ export default function QuoteDetail() {
                       : "Match Rate"}
                   </strong>
                   <span>
-                    {latestAssignment?.result_json.group_summary
-                      ? `${Math.round(
-                          latestAssignment.result_json.group_summary
-                            .coverage_percentage * 100,
-                        )}%`
+                    {latestGroupSummary
+                      ? formatEffectiveCoverageRate(latestGroupSummary)
                       : latestAssignment
                         ? `${Math.round(latestAssignment.confidence * 100)}%`
                         : "—"}
                   </span>
+                  {latestGroupSummary?.fallback_used && (
+                    <>
+                      <strong>Direct Contract Match</strong>
+                      <span>{formatDirectCoverageRate(latestGroupSummary)}</span>
+                    </>
+                  )}
                   <strong>Confidence</strong>
                   <span>
                     {latestAssignment
@@ -1497,7 +1516,7 @@ export default function QuoteDetail() {
                     Refresh Network Assignment
                   </button>
                 </div>
-                {latestAssignment?.result_json.group_summary ? (
+                {latestGroupSummary ? (
                   <>
                     <div className="card-row">
                       <div>
@@ -1505,21 +1524,16 @@ export default function QuoteDetail() {
                         <div className="helper">
                           {quote.manual_network
                             ? `${formatNetworkLabel(quote.manual_network)} (manual override)`
-                            : formatNetworkLabel(
-                                latestAssignment.result_json.group_summary
-                                  .primary_network,
-                              )}
+                            : formatNetworkLabel(latestGroupSummary.primary_network)}
                         </div>
                       </div>
                       <div className="helper">
-                        Coverage:{" "}
-                        {Math.round(
-                          latestAssignment.result_json.group_summary
-                            .coverage_percentage * 100,
-                        )}
-                        % · Members counted:{" "}
-                        {latestAssignment.result_json.group_summary
-                          .total_members}
+                        Coverage: {formatEffectiveCoverageRate(latestGroupSummary)}
+                        {latestGroupSummary.fallback_used
+                          ? ` · Direct contract match: ${formatDirectCoverageRate(latestGroupSummary)}`
+                          : ""}
+                        {" · Members counted: "}
+                        {latestGroupSummary.total_members}
                       </div>
                     </div>
                     {latestAssignment && (
@@ -1528,7 +1542,11 @@ export default function QuoteDetail() {
                           <thead>
                             <tr>
                               <th>Network</th>
-                              <th>Coverage</th>
+                              <th>
+                                {latestGroupSummary.fallback_used
+                                  ? "Direct Match Rate"
+                                  : "Coverage"}
+                              </th>
                             </tr>
                           </thead>
                           <tbody>
@@ -1551,13 +1569,9 @@ export default function QuoteDetail() {
                         onPageChange={setCoveragePage}
                       />
                     )}
-                    {latestAssignment.result_json.group_summary.invalid_rows
-                      ?.length > 0 && (
+                    {latestGroupSummary.invalid_rows?.length > 0 && (
                       <div className="notice" style={{ marginTop: 12 }}>
-                        {
-                          latestAssignment.result_json.group_summary.invalid_rows
-                            .length
-                        }{" "}
+                        {latestGroupSummary.invalid_rows.length}{" "}
                         row(s) had invalid ZIPs and were excluded from coverage.
                       </div>
                     )}
