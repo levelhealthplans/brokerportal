@@ -1,6 +1,7 @@
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { Link, useNavigate, useParams } from "react-router-dom";
 import {
+  completeImplementationFormTask,
   deleteImplementation,
   deleteInstallationDocument,
   getInstallation,
@@ -13,13 +14,17 @@ import {
 import { useAccess } from "../access";
 import { useAutoDismissMessage } from "../hooks/useAutoDismissMessage";
 
-type HubspotTaskFormConfig = {
+type HubspotFormConfig = {
   portalId: string;
   formId: string;
   region: string;
 };
 
-function parseHubspotFormTaskUrl(taskTitle: string, taskUrl: string | null | undefined): HubspotTaskFormConfig | null {
+type HubspotTaskFormConfig = HubspotFormConfig & {
+  taskId: string;
+};
+
+function parseHubspotFormTaskUrl(taskTitle: string, taskUrl: string | null | undefined): HubspotFormConfig | null {
   if ((taskTitle || "").trim().toLowerCase() !== "implementation forms") {
     return null;
   }
@@ -91,6 +96,7 @@ export default function ImplementationDetail() {
   const [taskUrlDrafts, setTaskUrlDrafts] = useState<Record<string, string>>({});
   const [activeHubspotForm, setActiveHubspotForm] = useState<HubspotTaskFormConfig | null>(null);
   const [hubspotFormError, setHubspotFormError] = useState<string | null>(null);
+  const hubspotFormCompletionFired = useRef(false);
   const statusMessageFading = useAutoDismissMessage(statusMessage, setStatusMessage, 5000, 500);
   const { role, email } = useAccess();
   const isAdmin = role === "admin";
@@ -238,7 +244,61 @@ export default function ImplementationDetail() {
       return;
     }
     let cancelled = false;
+    hubspotFormCompletionFired.current = false;
     setHubspotFormError(null);
+
+    const markTaskCompleteFromForm = async () => {
+      if (hubspotFormCompletionFired.current) {
+        return;
+      }
+      hubspotFormCompletionFired.current = true;
+      try {
+        const updatedTask = await completeImplementationFormTask(
+          installationId,
+          activeHubspotForm.taskId,
+          { role, email }
+        );
+        if (cancelled) return;
+        setData((prev) => {
+          if (!prev) return prev;
+          return {
+            ...prev,
+            tasks: prev.tasks.map((task) =>
+              task.id === updatedTask.id ? { ...task, ...updatedTask } : task
+            ),
+          };
+        });
+        setTaskUrlDrafts((prev) => ({
+          ...prev,
+          [updatedTask.id]: updatedTask.task_url || "",
+        }));
+        setStatusMessage("Implementation Forms task marked complete.");
+        setActiveHubspotForm(null);
+      } catch (err: any) {
+        if (cancelled) return;
+        hubspotFormCompletionFired.current = false;
+        setHubspotFormError(
+          err?.message || "Form submitted, but task completion update failed."
+        );
+      }
+    };
+
+    const handleHubspotFormSuccess = (event: Event) => {
+      const custom = event as CustomEvent<Record<string, unknown>>;
+      const detail = custom?.detail || {};
+      const submittedFormId = String(
+        detail["formId"] || detail["formGuid"] || ""
+      ).trim();
+      if (submittedFormId && submittedFormId !== activeHubspotForm.formId) {
+        return;
+      }
+      void markTaskCompleteFromForm();
+    };
+
+    window.addEventListener(
+      "hs-form-event:on-submission:success",
+      handleHubspotFormSuccess as EventListener
+    );
 
     const renderForm = async () => {
       try {
@@ -260,6 +320,9 @@ export default function ImplementationDetail() {
           portalId: activeHubspotForm.portalId,
           formId: activeHubspotForm.formId,
           target: "#implementation-hubspot-form-container",
+          onFormSubmitted: () => {
+            void markTaskCompleteFromForm();
+          },
         });
       } catch (err: any) {
         if (cancelled) return;
@@ -270,12 +333,16 @@ export default function ImplementationDetail() {
     void renderForm();
     return () => {
       cancelled = true;
+      window.removeEventListener(
+        "hs-form-event:on-submission:success",
+        handleHubspotFormSuccess as EventListener
+      );
       const container = document.getElementById("implementation-hubspot-form-container");
       if (container) {
         container.innerHTML = "";
       }
     };
-  }, [activeHubspotForm]);
+  }, [activeHubspotForm, email, installationId, role]);
 
   if (!data) {
     return <div className="section">Loading implementation...</div>;
@@ -343,7 +410,13 @@ export default function ImplementationDetail() {
                     <button
                       className="button secondary"
                       type="button"
-                      onClick={() => setActiveHubspotForm(hubspotFormConfig)}
+                      onClick={() => {
+                        setHubspotFormError(null);
+                        setActiveHubspotForm({
+                          taskId: task.id,
+                          ...hubspotFormConfig,
+                        });
+                      }}
                     >
                       Open Form
                     </button>

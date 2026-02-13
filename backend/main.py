@@ -6802,6 +6802,39 @@ def list_installations(
     return [InstallationOut(**dict(row)) for row in rows]
 
 
+def require_installation_access(
+    conn: sqlite3.Connection,
+    installation_id: str,
+    request: Request,
+    role: Optional[str] = None,
+    email: Optional[str] = None,
+) -> tuple[sqlite3.Row, Optional[str], Optional[str]]:
+    scoped_role, scoped_email = resolve_access_scope(conn, request, role, email)
+    cur = conn.cursor()
+    cur.execute("SELECT * FROM Installation WHERE id = ?", (installation_id,))
+    installation = cur.fetchone()
+    if not installation:
+        raise HTTPException(status_code=404, detail="Installation not found")
+    if scoped_role != "admin":
+        where_clause, params = build_access_filter(
+            conn,
+            scoped_role,
+            scoped_email,
+            include_assigned_user=False,
+        )
+        if where_clause:
+            cur.execute(
+                f"SELECT id FROM Installation {where_clause} AND id = ? LIMIT 1",
+                [*params, installation_id],
+            )
+            scoped = cur.fetchone()
+            if not scoped:
+                raise HTTPException(status_code=404, detail="Installation not found")
+        else:
+            raise HTTPException(status_code=404, detail="Installation not found")
+    return installation, scoped_role, scoped_email
+
+
 @app.get("/api/installations/{installation_id}")
 def get_installation_detail(
     installation_id: str,
@@ -6810,29 +6843,10 @@ def get_installation_detail(
     email: Optional[str] = None,
 ) -> Dict[str, Any]:
     with get_db() as conn:
-        scoped_role, scoped_email = resolve_access_scope(conn, request, role, email)
+        installation, scoped_role, scoped_email = require_installation_access(
+            conn, installation_id, request, role, email
+        )
         cur = conn.cursor()
-        cur.execute("SELECT * FROM Installation WHERE id = ?", (installation_id,))
-        installation = cur.fetchone()
-        if not installation:
-            raise HTTPException(status_code=404, detail="Installation not found")
-        if scoped_role != "admin":
-            where_clause, params = build_access_filter(
-                conn,
-                scoped_role,
-                scoped_email,
-                include_assigned_user=False,
-            )
-            if where_clause:
-                cur.execute(
-                    f"SELECT id FROM Installation {where_clause} AND id = ? LIMIT 1",
-                    [*params, installation_id],
-                )
-                scoped = cur.fetchone()
-                if not scoped:
-                    raise HTTPException(status_code=404, detail="Installation not found")
-            else:
-                raise HTTPException(status_code=404, detail="Installation not found")
         cur.execute(
             "SELECT * FROM Task WHERE installation_id = ? ORDER BY title",
             (installation_id,),
@@ -6955,6 +6969,50 @@ def advance_task(
         cur.execute("SELECT * FROM Task WHERE id = ?", (task_id,))
         updated = cur.fetchone()
 
+    return TaskOut(**dict(updated))
+
+
+@app.post(
+    "/api/installations/{installation_id}/tasks/{task_id}/complete-implementation-form",
+    response_model=TaskOut,
+)
+def complete_implementation_forms_task(
+    installation_id: str,
+    task_id: str,
+    request: Request,
+    role: Optional[str] = None,
+    email: Optional[str] = None,
+) -> TaskOut:
+    with get_db() as conn:
+        require_installation_access(conn, installation_id, request, role, email)
+        cur = conn.cursor()
+        cur.execute(
+            "SELECT * FROM Task WHERE id = ? AND installation_id = ?",
+            (task_id, installation_id),
+        )
+        task = cur.fetchone()
+        if not task:
+            raise HTTPException(status_code=404, detail="Task not found")
+        if str(task["title"] or "").strip().lower() != "implementation forms":
+            raise HTTPException(
+                status_code=400,
+                detail="Only the Implementation Forms task can be auto-completed",
+            )
+
+        cur.execute(
+            "UPDATE Task SET state = ? WHERE id = ?",
+            ("Complete", task_id),
+        )
+        cur.execute(
+            "UPDATE Installation SET updated_at = ? WHERE id = ?",
+            (now_iso(), installation_id),
+        )
+        conn.commit()
+
+        cur.execute("SELECT * FROM Task WHERE id = ?", (task_id,))
+        updated = cur.fetchone()
+        if not updated:
+            raise HTTPException(status_code=404, detail="Task not found")
     return TaskOut(**dict(updated))
 
 

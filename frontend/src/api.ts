@@ -885,6 +885,20 @@ export function updateTask(
   );
 }
 
+export function completeImplementationFormTask(
+  installationId: string,
+  taskId: string,
+  access?: AccessParams
+) {
+  return request<Task>(
+    withAccessParams(
+      `/installations/${installationId}/tasks/${taskId}/complete-implementation-form`,
+      access
+    ),
+    { method: "POST" }
+  );
+}
+
 export async function uploadInstallationDocument(installationId: string, file: File) {
   const form = new FormData();
   form.append("file", file);

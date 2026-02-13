@@ -251,6 +251,66 @@ class InstallationRegressionTests(unittest.TestCase):
             row = main.fetch_quote(conn, quote.id)
             self.assertEqual(row["status"], "Quote Submitted")
 
+    def test_complete_implementation_forms_task_marks_complete(self) -> None:
+        quote = self._create_quote()
+        installation = self._create_installation(quote.id)
+
+        with main.get_db() as conn:
+            cur = conn.cursor()
+            cur.execute(
+                """
+                SELECT id
+                FROM Task
+                WHERE installation_id = ? AND title = ?
+                LIMIT 1
+                """,
+                (installation.id, "Implementation Forms"),
+            )
+            task = cur.fetchone()
+            self.assertIsNotNone(task)
+            task_id = task["id"]
+
+        with patch.object(
+            main,
+            "resolve_access_scope",
+            return_value=("sponsor", "owner@regression.example.com"),
+        ):
+            updated = main.complete_implementation_forms_task(
+                installation.id,
+                task_id,
+                request=object(),
+            )
+
+        self.assertEqual(updated.state, "Complete")
+
+    def test_complete_implementation_forms_task_rejects_other_titles(self) -> None:
+        quote = self._create_quote()
+        installation = self._create_installation(quote.id)
+
+        with main.get_db() as conn:
+            cur = conn.cursor()
+            cur.execute(
+                """
+                SELECT id
+                FROM Task
+                WHERE installation_id = ? AND title = ?
+                LIMIT 1
+                """,
+                (installation.id, "Program Agreement"),
+            )
+            task = cur.fetchone()
+            self.assertIsNotNone(task)
+            task_id = task["id"]
+
+        with patch.object(main, "resolve_access_scope", return_value=("admin", "admin@example.com")):
+            with self.assertRaises(HTTPException) as exc:
+                main.complete_implementation_forms_task(
+                    installation.id,
+                    task_id,
+                    request=object(),
+                )
+        self.assertEqual(exc.exception.status_code, 400)
+
     def test_delete_installation_removes_tasks_and_docs(self) -> None:
         quote = self._create_quote()
         installation = self._create_installation(quote.id)
