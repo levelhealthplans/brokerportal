@@ -374,6 +374,16 @@ export default function QuoteDetail() {
     return data.standardizations[0];
   }, [data]);
   const latestGroupSummary = latestAssignment?.result_json.group_summary || null;
+  const latestConfidencePercent = latestAssignment
+    ? Math.round(latestAssignment.confidence * 100)
+    : null;
+  const directCoveragePercent = latestGroupSummary
+    ? Math.round(latestGroupSummary.coverage_percentage * 100)
+    : null;
+  const hideConfidenceAsDuplicate =
+    latestConfidencePercent !== null &&
+    directCoveragePercent !== null &&
+    latestConfidencePercent === directCoveragePercent;
 
   const coverageRows = useMemo(
     () =>
@@ -1464,58 +1474,66 @@ export default function QuoteDetail() {
             )}
             {latestAssignment || quote.manual_network ? (
               <div>
-                <div className="kv">
-                  <strong>Direct Contract / Primary Network</strong>
-                  <span>
-                    {quote.manual_network
-                      ? formatNetworkLabel(quote.manual_network)
-                      : latestAssignment?.result_json.group_summary
-                        ? formatNetworkLabel(
-                            latestAssignment.result_json.group_summary
-                              .primary_network,
-                          )
-                        : formatNetworkLabel(latestAssignment?.recommendation)}
-                  </span>
-                  <strong>
-                    {latestAssignment?.result_json.group_summary
-                      ? "Coverage Rate"
-                      : "Match Rate"}
-                  </strong>
-                  <span>
-                    {latestGroupSummary
-                      ? formatEffectiveCoverageRate(latestGroupSummary)
-                      : latestAssignment
-                        ? `${Math.round(latestAssignment.confidence * 100)}%`
-                        : "—"}
-                  </span>
-                  {latestGroupSummary?.fallback_used && (
-                    <>
-                      <strong>Direct Contract Match</strong>
-                      <span>{formatDirectCoverageRate(latestGroupSummary)}</span>
-                    </>
-                  )}
-                  <strong>Confidence</strong>
-                  <span>
-                    {latestAssignment
-                      ? `${Math.round(latestAssignment.confidence * 100)}%`
-                      : "—"}
-                  </span>
-                  <strong>Rationale</strong>
-                  <span>
-                    {quote.manual_network && !latestAssignment
-                      ? "Manual override set by admin."
-                      : latestAssignment?.rationale || "—"}
-                  </span>
-                </div>
-                <div className="inline-actions" style={{ marginBottom: 12 }}>
-                  <button
-                    className="button secondary"
-                    onClick={handleAssign}
-                    disabled={busy}
-                  >
-                    Refresh Network Assignment
-                  </button>
-                </div>
+                {role === "admin" && (
+                  <>
+                    <div className="kv">
+                      <strong>Direct Contract / Primary Network</strong>
+                      <span>
+                        {quote.manual_network
+                          ? formatNetworkLabel(quote.manual_network)
+                          : latestAssignment?.result_json.group_summary
+                            ? formatNetworkLabel(
+                                latestAssignment.result_json.group_summary
+                                  .primary_network,
+                              )
+                            : formatNetworkLabel(latestAssignment?.recommendation)}
+                      </span>
+                      <strong>
+                        {latestAssignment?.result_json.group_summary
+                          ? "Coverage Rate"
+                          : "Match Rate"}
+                      </strong>
+                      <span>
+                        {latestGroupSummary
+                          ? formatEffectiveCoverageRate(latestGroupSummary)
+                          : latestAssignment
+                            ? `${Math.round(latestAssignment.confidence * 100)}%`
+                            : "—"}
+                      </span>
+                      {latestGroupSummary?.fallback_used && (
+                        <>
+                          <strong>Direct Contract Match</strong>
+                          <span>{formatDirectCoverageRate(latestGroupSummary)}</span>
+                        </>
+                      )}
+                      {!hideConfidenceAsDuplicate && (
+                        <>
+                          <strong>Confidence</strong>
+                          <span>
+                            {latestAssignment
+                              ? `${Math.round(latestAssignment.confidence * 100)}%`
+                              : "—"}
+                          </span>
+                        </>
+                      )}
+                      <strong>Rationale</strong>
+                      <span>
+                        {quote.manual_network && !latestAssignment
+                          ? "Manual override set by admin."
+                          : latestAssignment?.rationale || "—"}
+                      </span>
+                    </div>
+                    <div className="inline-actions" style={{ marginBottom: 12 }}>
+                      <button
+                        className="button secondary"
+                        onClick={handleAssign}
+                        disabled={busy}
+                      >
+                        Refresh Network Assignment
+                      </button>
+                    </div>
+                  </>
+                )}
                 {latestGroupSummary ? (
                   <>
                     <div className="card-row">
