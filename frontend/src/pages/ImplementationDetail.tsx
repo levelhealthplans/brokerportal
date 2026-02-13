@@ -25,7 +25,10 @@ type HubspotTaskFormConfig = HubspotFormConfig & {
 };
 
 type PandadocDropdownConfig = {
-  urls: string[];
+  options: Array<{
+    label: string;
+    url: string;
+  }>;
 };
 
 function parseHubspotFormTaskUrl(taskTitle: string, taskUrl: string | null | undefined): HubspotFormConfig | null {
@@ -70,7 +73,12 @@ function parsePandadocDropdownTaskUrl(
     if (!urls.length) {
       return null;
     }
-    return { urls };
+    const labels = parsed.searchParams.getAll("label").map((value) => value.trim());
+    const options = urls.map((url, index) => ({
+      url,
+      label: labels[index] || optionLabelFromUrl(url, index),
+    }));
+    return { options };
   } catch {
     return null;
   }
@@ -190,10 +198,11 @@ export default function ImplementationDetail() {
       data.tasks.forEach((task) => {
         const dropdown = parsePandadocDropdownTaskUrl(task.title, task.task_url);
         if (!dropdown) return;
+        const optionUrls = dropdown.options.map((option) => option.url);
         const existingSelection = prev[task.id];
-        next[task.id] = existingSelection && dropdown.urls.includes(existingSelection)
+        next[task.id] = existingSelection && optionUrls.includes(existingSelection)
           ? existingSelection
-          : dropdown.urls[0];
+          : optionUrls[0];
       });
       return next;
     });
@@ -494,8 +503,9 @@ export default function ImplementationDetail() {
                 }
                 const pandadocDropdownConfig = parsePandadocDropdownTaskUrl(task.title, task.task_url);
                 if (pandadocDropdownConfig) {
+                  const optionUrls = pandadocDropdownConfig.options.map((option) => option.url);
                   const selectedUrl =
-                    taskLinkSelections[task.id] || pandadocDropdownConfig.urls[0];
+                    taskLinkSelections[task.id] || optionUrls[0];
                   return (
                     <>
                       <select
@@ -507,9 +517,9 @@ export default function ImplementationDetail() {
                           }))
                         }
                       >
-                        {pandadocDropdownConfig.urls.map((url, index) => (
-                          <option key={`${task.id}-${url}`} value={url}>
-                            {optionLabelFromUrl(url, index)}
+                        {pandadocDropdownConfig.options.map((option, index) => (
+                          <option key={`${task.id}-${option.url}-${index}`} value={option.url}>
+                            {option.label}
                           </option>
                         ))}
                       </select>

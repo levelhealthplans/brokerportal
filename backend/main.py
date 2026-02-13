@@ -103,6 +103,17 @@ IMPLEMENTATION_TASK_TITLES = [
     "Plan is Live",
 ]
 
+DEFAULT_STOPLOSS_DISCLOSURE_OPTIONS: List[tuple[str, str]] = [
+    (
+        "Arlo",
+        "https://app.pandadoc.com/a/#/templates/bpN5tuyuHD7qzkr5t64PtQ",
+    ),
+    (
+        "Ryan Specialty",
+        "https://app.pandadoc.com/a/#/documents/MXBYyGs4H4ERZRrfjqxatN?new=true",
+    ),
+]
+
 HUBSPOT_UPLOAD_FIELD_TYPES = [
     ("census", "census"),
     ("sbc", "sbc"),
@@ -319,20 +330,114 @@ def parse_url_list(value: str) -> List[str]:
     return cleaned
 
 
-def build_pandadoc_dropdown_task_url(urls: List[str]) -> Optional[str]:
-    normalized: List[str] = []
-    for raw in urls:
-        candidate = str(raw or "").strip()
+def parse_labeled_url_list(value: str) -> List[tuple[Optional[str], str]]:
+    raw = str(value or "").strip()
+    if not raw:
+        return []
+    parts = re.split(r"[\n,;]+", raw)
+    cleaned: List[tuple[Optional[str], str]] = []
+    seen_urls: set[str] = set()
+    for part in parts:
+        candidate = str(part or "").strip()
         if not candidate:
             continue
-        if candidate not in normalized:
-            normalized.append(candidate)
+        label: Optional[str] = None
+        url = candidate
+        if "|" in candidate:
+            raw_label, raw_url = candidate.split("|", 1)
+            label = str(raw_label or "").strip() or None
+            url = str(raw_url or "").strip()
+        if not url or url in seen_urls:
+            continue
+        cleaned.append((label, url))
+        seen_urls.add(url)
+    return cleaned
+
+
+def build_pandadoc_dropdown_task_url_with_labels(
+    options: List[tuple[Optional[str], str]],
+) -> Optional[str]:
+    normalized: List[tuple[Optional[str], str]] = []
+    seen_urls: set[str] = set()
+    for option in options:
+        label, raw_url = option
+        candidate = str(raw_url or "").strip()
+        if not candidate or candidate in seen_urls:
+            continue
+        normalized_label = str(label or "").strip() or None
+        normalized.append((normalized_label, candidate))
+        seen_urls.add(candidate)
     if not normalized:
         return None
     if len(normalized) == 1:
-        return normalized[0]
-    query = urlparse.urlencode([("url", url) for url in normalized], doseq=True)
+        return normalized[0][1]
+    query_items: List[tuple[str, str]] = []
+    for label, url in normalized:
+        query_items.append(("url", url))
+        if label:
+            query_items.append(("label", label))
+    query = urlparse.urlencode(query_items, doseq=True)
     return f"pandadoc-dropdown://select?{query}"
+
+
+def build_pandadoc_dropdown_task_url(urls: List[str]) -> Optional[str]:
+    return build_pandadoc_dropdown_task_url_with_labels([(None, url) for url in urls])
+
+
+def resolve_stoploss_disclosure_options() -> List[tuple[Optional[str], str]]:
+    labeled_options = parse_labeled_url_list(
+        os.getenv("PANDADOC_STOPLOSS_DISCLOSURE_OPTIONS", "")
+    )
+    if labeled_options:
+        return labeled_options
+    urls = parse_url_list(os.getenv("PANDADOC_STOPLOSS_DISCLOSURE_URLS", ""))
+    if urls:
+        return [(None, url) for url in urls]
+    single = (os.getenv("PANDADOC_STOPLOSS_DISCLOSURE_URL", "") or "").strip()
+    if single:
+        return [(None, single)]
+    return [(label, url) for label, url in DEFAULT_STOPLOSS_DISCLOSURE_OPTIONS]
+
+
+def default_installation_task_owner(title: str) -> str:
+    if (title or "").strip().lower() == "stoploss disclosure":
+        return "Plan Sponsor"
+    return "Level Health"
+
+
+def find_sponsor_user_id_for_domain(
+    conn: sqlite3.Connection,
+    sponsor_domain: Optional[str],
+) -> Optional[str]:
+    domain = str(sponsor_domain or "").strip().lower()
+    if not domain:
+        return None
+    cur = conn.cursor()
+    cur.execute(
+        """
+        SELECT id, email, organization
+        FROM User
+        WHERE role = 'sponsor'
+        ORDER BY created_at ASC
+        """
+    )
+    for row in cur.fetchall():
+        org_value = str(row["organization"] or "").strip().lower()
+        email_value = str(row["email"] or "").strip().lower()
+        if org_value == domain or email_domain(email_value) == domain:
+            return str(row["id"] or "").strip() or None
+    return None
+
+
+def default_installation_task_assigned_user_id(
+    conn: sqlite3.Connection,
+    *,
+    title: str,
+    sponsor_domain: Optional[str],
+) -> Optional[str]:
+    if (title or "").strip().lower() != "stoploss disclosure":
+        return None
+    return find_sponsor_user_id_for_domain(conn, sponsor_domain)
 
 
 def default_installation_task_url(title: str) -> Optional[str]:
@@ -360,12 +465,9 @@ def default_installation_task_url(title: str) -> Optional[str]:
         )
         return popup_url
     if normalized_title == "stoploss disclosure":
-        url_list = parse_url_list(os.getenv("PANDADOC_STOPLOSS_DISCLOSURE_URLS", ""))
-        if not url_list:
-            single = (os.getenv("PANDADOC_STOPLOSS_DISCLOSURE_URL", "") or "").strip()
-            if single:
-                url_list = [single]
-        return build_pandadoc_dropdown_task_url(url_list)
+        return build_pandadoc_dropdown_task_url_with_labels(
+            resolve_stoploss_disclosure_options()
+        )
     return None
 
 
@@ -6781,22 +6883,28 @@ def convert_to_installation(
                 now,
             ),
         )
-        tasks = [
-            (
-                str(uuid.uuid4()),
-                installation_id,
-                title,
-                "Level Health",
-                None,
-                "Not Started",
-                default_installation_task_url(title),
+        tasks: List[tuple[Any, ...]] = []
+        for title in IMPLEMENTATION_TASK_TITLES:
+            tasks.append(
+                (
+                    str(uuid.uuid4()),
+                    installation_id,
+                    title,
+                    default_installation_task_owner(title),
+                    default_installation_task_assigned_user_id(
+                        conn,
+                        title=title,
+                        sponsor_domain=quote["sponsor_domain"],
+                    ),
+                    None,
+                    "Not Started",
+                    default_installation_task_url(title),
+                )
             )
-            for title in IMPLEMENTATION_TASK_TITLES
-        ]
         cur.executemany(
             """
-            INSERT INTO Task (id, installation_id, title, owner, due_date, state, task_url)
-            VALUES (?, ?, ?, ?, ?, ?, ?)
+            INSERT INTO Task (id, installation_id, title, owner, assigned_user_id, due_date, state, task_url)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?)
             """,
             tasks,
         )

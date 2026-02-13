@@ -79,6 +79,40 @@ class InstallationRegressionTests(unittest.TestCase):
         with patch.object(main, "resolve_access_scope", return_value=("admin", "admin@example.com")):
             return main.convert_to_installation(quote_id, request=object())
 
+    def _create_sponsor_user(
+        self,
+        *,
+        email: str,
+        organization: str,
+    ) -> str:
+        user_id = "sponsor-user-1"
+        with main.get_db() as conn:
+            cur = conn.cursor()
+            cur.execute(
+                """
+                INSERT INTO User (
+                    id, first_name, last_name, email, phone, job_title, organization, role,
+                    password_salt, password_hash, created_at, updated_at
+                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                """,
+                (
+                    user_id,
+                    "Plan",
+                    "Sponsor",
+                    email,
+                    "",
+                    "Admin",
+                    organization,
+                    "sponsor",
+                    "",
+                    "",
+                    main.now_iso(),
+                    main.now_iso(),
+                ),
+            )
+            conn.commit()
+        return user_id
+
     def test_broker_fields_require_admin_on_quote_update(self) -> None:
         quote = self._create_quote()
 
@@ -213,6 +247,65 @@ class InstallationRegressionTests(unittest.TestCase):
                 row["task_url"],
                 main.build_pandadoc_dropdown_task_url([url_one, url_two]),
             )
+
+    def test_convert_to_installation_sets_stoploss_disclosure_labeled_dropdown_url(self) -> None:
+        quote = self._create_quote()
+        url_one = "https://app.pandadoc.com/a/#/templates/bpN5tuyuHD7qzkr5t64PtQ"
+        url_two = "https://app.pandadoc.com/a/#/documents/MXBYyGs4H4ERZRrfjqxatN?new=true"
+        with patch.dict(
+            main.os.environ,
+            {
+                "PANDADOC_STOPLOSS_DISCLOSURE_OPTIONS": (
+                    f"Arlo|{url_one}\nRyan Specialty|{url_two}"
+                ),
+                "PANDADOC_STOPLOSS_DISCLOSURE_URLS": "",
+                "PANDADOC_STOPLOSS_DISCLOSURE_URL": "",
+            },
+            clear=False,
+        ):
+            installation = self._create_installation(quote.id)
+
+        with main.get_db() as conn:
+            cur = conn.cursor()
+            cur.execute(
+                """
+                SELECT task_url
+                FROM Task
+                WHERE installation_id = ? AND title = ?
+                LIMIT 1
+                """,
+                (installation.id, "Stoploss Disclosure"),
+            )
+            row = cur.fetchone()
+            self.assertIsNotNone(row)
+            expected = main.build_pandadoc_dropdown_task_url_with_labels(
+                [("Arlo", url_one), ("Ryan Specialty", url_two)]
+            )
+            self.assertEqual(row["task_url"], expected)
+
+    def test_convert_to_installation_assigns_stoploss_disclosure_to_sponsor(self) -> None:
+        quote = self._create_quote()
+        sponsor_user_id = self._create_sponsor_user(
+            email="owner@regression.example.com",
+            organization="regression.example.com",
+        )
+        installation = self._create_installation(quote.id)
+
+        with main.get_db() as conn:
+            cur = conn.cursor()
+            cur.execute(
+                """
+                SELECT owner, assigned_user_id
+                FROM Task
+                WHERE installation_id = ? AND title = ?
+                LIMIT 1
+                """,
+                (installation.id, "Stoploss Disclosure"),
+            )
+            row = cur.fetchone()
+            self.assertIsNotNone(row)
+            self.assertEqual(row["owner"], "Plan Sponsor")
+            self.assertEqual(row["assigned_user_id"], sponsor_user_id)
 
     def test_backfill_installation_orgs_syncs_stale_values(self) -> None:
         quote = self._create_quote()
