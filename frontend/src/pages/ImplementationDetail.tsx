@@ -24,6 +24,10 @@ type HubspotTaskFormConfig = HubspotFormConfig & {
   taskId: string;
 };
 
+type PandadocDropdownConfig = {
+  urls: string[];
+};
+
 function parseHubspotFormTaskUrl(taskTitle: string, taskUrl: string | null | undefined): HubspotFormConfig | null {
   if ((taskTitle || "").trim().toLowerCase() !== "implementation forms") {
     return null;
@@ -44,6 +48,45 @@ function parseHubspotFormTaskUrl(taskTitle: string, taskUrl: string | null | und
   } catch {
     return null;
   }
+}
+
+function parsePandadocDropdownTaskUrl(
+  taskTitle: string,
+  taskUrl: string | null | undefined
+): PandadocDropdownConfig | null {
+  if ((taskTitle || "").trim().toLowerCase() !== "stoploss disclosure") {
+    return null;
+  }
+  const raw = (taskUrl || "").trim();
+  if (!raw || !raw.toLowerCase().startsWith("pandadoc-dropdown://")) {
+    return null;
+  }
+  try {
+    const parsed = new URL(raw);
+    const urls = parsed.searchParams
+      .getAll("url")
+      .map((value) => value.trim())
+      .filter((value, index, arr) => value.length > 0 && arr.indexOf(value) === index);
+    if (!urls.length) {
+      return null;
+    }
+    return { urls };
+  } catch {
+    return null;
+  }
+}
+
+function optionLabelFromUrl(url: string, index: number): string {
+  try {
+    const parsed = new URL(url);
+    const templateMatch = parsed.hash.match(/\/templates\/([^/?#]+)/i);
+    if (templateMatch?.[1]) {
+      return `Template ${templateMatch[1]}`;
+    }
+  } catch {
+    // no-op
+  }
+  return `Option ${index + 1}`;
 }
 
 function loadHubspotFormsScript(portalId: string): Promise<void> {
@@ -106,6 +149,7 @@ export default function ImplementationDetail() {
   const [busy, setBusy] = useState(false);
   const [userNameById, setUserNameById] = useState<Record<string, string>>({});
   const [taskUrlDrafts, setTaskUrlDrafts] = useState<Record<string, string>>({});
+  const [taskLinkSelections, setTaskLinkSelections] = useState<Record<string, string>>({});
   const [activeHubspotForm, setActiveHubspotForm] = useState<HubspotTaskFormConfig | null>(null);
   const [hubspotFormError, setHubspotFormError] = useState<string | null>(null);
   const hubspotFormCompletionFired = useRef(false);
@@ -141,6 +185,18 @@ export default function ImplementationDetail() {
     setTaskUrlDrafts(
       Object.fromEntries(data.tasks.map((task) => [task.id, task.task_url || ""]))
     );
+    setTaskLinkSelections((prev) => {
+      const next: Record<string, string> = {};
+      data.tasks.forEach((task) => {
+        const dropdown = parsePandadocDropdownTaskUrl(task.title, task.task_url);
+        if (!dropdown) return;
+        const existingSelection = prev[task.id];
+        next[task.id] = existingSelection && dropdown.urls.includes(existingSelection)
+          ? existingSelection
+          : dropdown.urls[0];
+      });
+      return next;
+    });
   }, [data]);
 
   const normalizeState = (state: string) => {
@@ -434,6 +490,38 @@ export default function ImplementationDetail() {
                     >
                       Open Form
                     </button>
+                  );
+                }
+                const pandadocDropdownConfig = parsePandadocDropdownTaskUrl(task.title, task.task_url);
+                if (pandadocDropdownConfig) {
+                  const selectedUrl =
+                    taskLinkSelections[task.id] || pandadocDropdownConfig.urls[0];
+                  return (
+                    <>
+                      <select
+                        value={selectedUrl}
+                        onChange={(event) =>
+                          setTaskLinkSelections((prev) => ({
+                            ...prev,
+                            [task.id]: event.target.value,
+                          }))
+                        }
+                      >
+                        {pandadocDropdownConfig.urls.map((url, index) => (
+                          <option key={`${task.id}-${url}`} value={url}>
+                            {optionLabelFromUrl(url, index)}
+                          </option>
+                        ))}
+                      </select>
+                      <a
+                        className="button secondary"
+                        href={selectedUrl}
+                        target="_blank"
+                        rel="noreferrer"
+                      >
+                        Open Link
+                      </a>
+                    </>
                   );
                 }
                 if (task.task_url) {

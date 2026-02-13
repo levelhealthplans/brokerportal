@@ -90,7 +90,7 @@ class InstallationRegressionTests(unittest.TestCase):
                     request=object(),
                 )
         self.assertEqual(exc.exception.status_code, 403)
-        self.assertIn("Only admin can edit broker information", str(exc.exception.detail))
+        self.assertIn("Only admin can edit broker", str(exc.exception.detail))
 
         with patch.object(main, "get_session_user", return_value={"role": "admin"}), patch.object(
             main, "sync_quote_to_hubspot_async", return_value=None
@@ -180,6 +180,38 @@ class InstallationRegressionTests(unittest.TestCase):
             self.assertEqual(
                 row["task_url"],
                 "hubspot-form://popup?portal_id=7106327&form_id=f215c8d6-451d-4b7b-826f-fdab43b80369&region=na1",
+            )
+
+    def test_convert_to_installation_sets_stoploss_disclosure_dropdown_url(self) -> None:
+        quote = self._create_quote()
+        url_one = "https://app.pandadoc.com/a/#/templates/bpN5tuyuHD7qzkr5t64PtQ"
+        url_two = "https://app.pandadoc.com/a/#/templates/wFdvAHTyGU6REL7Mn4bby5"
+        with patch.dict(
+            main.os.environ,
+            {
+                "PANDADOC_STOPLOSS_DISCLOSURE_URLS": f"{url_one}\n{url_two};{url_one}",
+                "PANDADOC_STOPLOSS_DISCLOSURE_URL": "",
+            },
+            clear=False,
+        ):
+            installation = self._create_installation(quote.id)
+
+        with main.get_db() as conn:
+            cur = conn.cursor()
+            cur.execute(
+                """
+                SELECT task_url
+                FROM Task
+                WHERE installation_id = ? AND title = ?
+                LIMIT 1
+                """,
+                (installation.id, "Stoploss Disclosure"),
+            )
+            row = cur.fetchone()
+            self.assertIsNotNone(row)
+            self.assertEqual(
+                row["task_url"],
+                main.build_pandadoc_dropdown_task_url([url_one, url_two]),
             )
 
     def test_backfill_installation_orgs_syncs_stale_values(self) -> None:

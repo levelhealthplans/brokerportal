@@ -304,6 +304,37 @@ def build_hubspot_form_popup_task_url(
     return f"hubspot-form://popup?{query}"
 
 
+def parse_url_list(value: str) -> List[str]:
+    raw = str(value or "").strip()
+    if not raw:
+        return []
+    parts = re.split(r"[\n,;]+", raw)
+    cleaned: List[str] = []
+    for part in parts:
+        candidate = str(part or "").strip()
+        if not candidate:
+            continue
+        if candidate not in cleaned:
+            cleaned.append(candidate)
+    return cleaned
+
+
+def build_pandadoc_dropdown_task_url(urls: List[str]) -> Optional[str]:
+    normalized: List[str] = []
+    for raw in urls:
+        candidate = str(raw or "").strip()
+        if not candidate:
+            continue
+        if candidate not in normalized:
+            normalized.append(candidate)
+    if not normalized:
+        return None
+    if len(normalized) == 1:
+        return normalized[0]
+    query = urlparse.urlencode([("url", url) for url in normalized], doseq=True)
+    return f"pandadoc-dropdown://select?{query}"
+
+
 def default_installation_task_url(title: str) -> Optional[str]:
     normalized_title = (title or "").strip().lower()
     if normalized_title == "implementation forms":
@@ -328,6 +359,13 @@ def default_installation_task_url(title: str) -> Optional[str]:
             region=region,
         )
         return popup_url
+    if normalized_title == "stoploss disclosure":
+        url_list = parse_url_list(os.getenv("PANDADOC_STOPLOSS_DISCLOSURE_URLS", ""))
+        if not url_list:
+            single = (os.getenv("PANDADOC_STOPLOSS_DISCLOSURE_URL", "") or "").strip()
+            if single:
+                url_list = [single]
+        return build_pandadoc_dropdown_task_url(url_list)
     return None
 
 
