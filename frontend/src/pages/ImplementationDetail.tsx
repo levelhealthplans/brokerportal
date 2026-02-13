@@ -84,6 +84,18 @@ function loadHubspotFormsScript(portalId: string): Promise<void> {
   });
 }
 
+function renderHubspotDeveloperEmbed(
+  container: HTMLElement,
+  config: HubspotFormConfig
+) {
+  const formHost = document.createElement("div");
+  formHost.className = "hs-form-html";
+  formHost.setAttribute("data-region", config.region);
+  formHost.setAttribute("data-form-id", config.formId);
+  formHost.setAttribute("data-portal-id", config.portalId);
+  container.appendChild(formHost);
+}
+
 export default function ImplementationDetail() {
   const { id } = useParams();
   const navigate = useNavigate();
@@ -312,18 +324,20 @@ export default function ImplementationDetail() {
           hbspt?: { forms?: { create?: (config: Record<string, unknown>) => void } };
         };
         const createForm = currentWindow.hbspt?.forms?.create;
-        if (!createForm) {
-          throw new Error("HubSpot forms library is unavailable.");
+        if (createForm) {
+          createForm({
+            region: activeHubspotForm.region,
+            portalId: activeHubspotForm.portalId,
+            formId: activeHubspotForm.formId,
+            target: "#implementation-hubspot-form-container",
+            onFormSubmitted: () => {
+              void markTaskCompleteFromForm();
+            },
+          });
+          return;
         }
-        createForm({
-          region: activeHubspotForm.region,
-          portalId: activeHubspotForm.portalId,
-          formId: activeHubspotForm.formId,
-          target: "#implementation-hubspot-form-container",
-          onFormSubmitted: () => {
-            void markTaskCompleteFromForm();
-          },
-        });
+        // Developer embed runtime can auto-render via .hs-form-html nodes.
+        renderHubspotDeveloperEmbed(container, activeHubspotForm);
       } catch (err: any) {
         if (cancelled) return;
         setHubspotFormError(err?.message || "Unable to load HubSpot form.");
