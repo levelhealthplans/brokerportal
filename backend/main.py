@@ -2429,6 +2429,50 @@ def compute_network_assignment(
     return result
 
 
+def parse_assignment_primary_network(result_json: Any) -> Optional[str]:
+    if not isinstance(result_json, dict):
+        return None
+    group_summary = result_json.get("group_summary")
+    if isinstance(group_summary, dict):
+        primary = str(group_summary.get("primary_network") or "").strip()
+        if primary:
+            return primary
+    primary = str(result_json.get("primary_network") or "").strip()
+    return primary or None
+
+
+def latest_assignment_primary_network(
+    conn: sqlite3.Connection,
+    quote_id: str,
+) -> Optional[str]:
+    cur = conn.cursor()
+    cur.execute(
+        """
+        SELECT result_json, recommendation
+        FROM AssignmentRun
+        WHERE quote_id = ?
+        ORDER BY created_at DESC
+        LIMIT 1
+        """,
+        (quote_id,),
+    )
+    row = cur.fetchone()
+    if not row:
+        return None
+    parsed_result: Dict[str, Any] = {}
+    try:
+        parsed = json.loads(row["result_json"] or "{}")
+        if isinstance(parsed, dict):
+            parsed_result = parsed
+    except Exception:
+        parsed_result = {}
+    primary_from_result = parse_assignment_primary_network(parsed_result)
+    if primary_from_result:
+        return primary_from_result
+    recommendation = str(row["recommendation"] or "").strip()
+    return recommendation or None
+
+
 def load_network_mapping(mapping_path: Path) -> Dict[str, str]:
     if not mapping_path.exists():
         raise HTTPException(status_code=500, detail="Network mapping file not found")
@@ -6441,6 +6485,14 @@ def update_quote(quote_id: str, payload: QuoteUpdate, request: Request) -> Quote
         if "employer_domain" in updates and "sponsor_domain" not in updates:
             if updates.get("employer_domain"):
                 updates["sponsor_domain"] = updates["employer_domain"].lower()
+        if "manual_network" in updates and "primary_network" not in updates:
+            manual_network = str(updates.get("manual_network") or "").strip()
+            if manual_network:
+                updates["manual_network"] = manual_network
+                updates["primary_network"] = manual_network
+            else:
+                updates["manual_network"] = None
+                updates["primary_network"] = latest_assignment_primary_network(conn, quote_id)
         for key, value in updates.items():
             if key == "include_specialty" and value is not None:
                 value = 1 if value else 0
@@ -7089,8 +7141,8 @@ def run_assignment(quote_id: str) -> AssignmentOut:
             ),
         )
         cur.execute(
-            "UPDATE Quote SET manual_network = NULL, updated_at = ? WHERE id = ?",
-            (now_iso(), quote_id),
+            "UPDATE Quote SET primary_network = ?, manual_network = NULL, updated_at = ? WHERE id = ?",
+            (primary_network, now_iso(), quote_id),
         )
         conn.commit()
         recompute_needs_action(conn, quote_id)

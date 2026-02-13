@@ -136,6 +136,65 @@ class InstallationRegressionTests(unittest.TestCase):
             )
         self.assertEqual(updated.broker_phone, "555-3333")
 
+    def test_update_quote_manual_network_syncs_primary_network(self) -> None:
+        quote = self._create_quote()
+
+        with patch.object(main, "get_session_user", return_value={"role": "admin"}), patch.object(
+            main, "sync_quote_to_hubspot_async", return_value=None
+        ):
+            updated = main.update_quote(
+                quote.id,
+                main.QuoteUpdate(manual_network="Mercy_MO"),
+                request=object(),
+            )
+
+        self.assertEqual(updated.manual_network, "Mercy_MO")
+        self.assertEqual(updated.primary_network, "Mercy_MO")
+
+    def test_update_quote_clearing_manual_network_uses_latest_assignment_primary(self) -> None:
+        quote = self._create_quote()
+        created_at = main.now_iso()
+        with main.get_db() as conn:
+            cur = conn.cursor()
+            cur.execute(
+                """
+                INSERT INTO AssignmentRun (
+                    id, quote_id, result_json, recommendation, confidence, rationale, created_at
+                ) VALUES (?, ?, ?, ?, ?, ?, ?)
+                """,
+                (
+                    "assignment-1",
+                    quote.id,
+                    main.json.dumps(
+                        {
+                            "group_summary": {
+                                "primary_network": "Mercy_MO",
+                                "coverage_percentage": 0.95,
+                                "fallback_used": False,
+                                "review_required": False,
+                            }
+                        }
+                    ),
+                    "Mercy_MO",
+                    0.95,
+                    "Direct contract coverage meets threshold.",
+                    created_at,
+                ),
+            )
+            conn.commit()
+
+        with patch.object(main, "get_session_user", return_value={"role": "admin"}), patch.object(
+            main, "sync_quote_to_hubspot_async", return_value=None
+        ):
+            updated = main.update_quote(
+                quote.id,
+                main.QuoteUpdate(manual_network=""),
+                request=object(),
+            )
+
+        self.assertIsNone(updated.manual_network)
+        self.assertEqual(updated.primary_network, "Mercy_MO")
+
     def test_quote_broker_org_and_sponsor_domain_propagate_to_installation(self) -> None:
         quote = self._create_quote()
         installation = self._create_installation(quote.id)
