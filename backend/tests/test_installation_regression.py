@@ -129,6 +129,27 @@ class InstallationRegressionTests(unittest.TestCase):
             self.assertEqual(install_row["broker_org"], "TWS")
             self.assertEqual(install_row["sponsor_domain"], "twsbenefits.com")
 
+    def test_convert_to_installation_sets_implementation_forms_url_from_env(self) -> None:
+        quote = self._create_quote()
+        form_url = "https://share.hsforms.com/1-example-form"
+        with patch.dict(main.os.environ, {"HUBSPOT_IMPLEMENTATION_FORM_URL": form_url}, clear=False):
+            installation = self._create_installation(quote.id)
+
+        with main.get_db() as conn:
+            cur = conn.cursor()
+            cur.execute(
+                """
+                SELECT task_url
+                FROM Task
+                WHERE installation_id = ? AND title = ?
+                LIMIT 1
+                """,
+                (installation.id, "Implementation Forms"),
+            )
+            row = cur.fetchone()
+            self.assertIsNotNone(row)
+            self.assertEqual(row["task_url"], form_url)
+
     def test_backfill_installation_orgs_syncs_stale_values(self) -> None:
         quote = self._create_quote()
         installation = self._create_installation(quote.id)

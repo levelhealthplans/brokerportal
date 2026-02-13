@@ -76,6 +76,7 @@ In Render service env vars, confirm:
 - `UPLOADS_DIR=/var/data/uploads`
 - `SESSION_COOKIE_SECURE=true`
 - `SESSION_COOKIE_SAMESITE=lax`
+- `HUBSPOT_IMPLEMENTATION_FORM_URL=https://share.hsforms.com/...`
 
 ## Important Production Notes
 

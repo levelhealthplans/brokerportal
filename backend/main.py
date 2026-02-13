@@ -283,6 +283,14 @@ def normalize_task_state(state: Optional[str]) -> Optional[str]:
     return TASK_STATE_CANONICAL.get(key)
 
 
+def default_installation_task_url(title: str) -> Optional[str]:
+    normalized_title = (title or "").strip().lower()
+    if normalized_title == "implementation forms":
+        url = (os.getenv("HUBSPOT_IMPLEMENTATION_FORM_URL", "") or "").strip()
+        return url or None
+    return None
+
+
 def fetch_org_by_domain(
     conn: sqlite3.Connection, org_type: str, domain: Optional[str]
 ) -> Optional[sqlite3.Row]:
@@ -6696,7 +6704,15 @@ def convert_to_installation(
             ),
         )
         tasks = [
-            (str(uuid.uuid4()), installation_id, title, "Level Health", None, "Not Started", None)
+            (
+                str(uuid.uuid4()),
+                installation_id,
+                title,
+                "Level Health",
+                None,
+                "Not Started",
+                default_installation_task_url(title),
+            )
             for title in IMPLEMENTATION_TASK_TITLES
         ]
         cur.executemany(
