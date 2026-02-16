@@ -335,6 +335,28 @@ def parse_url_list(value: str) -> List[str]:
     return cleaned
 
 
+def resolve_frontend_base_url(request: Optional[Request] = None) -> str:
+    if not request:
+        return FRONTEND_BASE_URL
+
+    origin = str(request.headers.get("origin") or "").strip().rstrip("/")
+    if origin and origin in ALLOWED_ORIGINS:
+        return origin
+
+    referer = str(request.headers.get("referer") or "").strip()
+    if referer:
+        try:
+            parsed = urlparse.urlparse(referer)
+            if parsed.scheme and parsed.netloc:
+                referer_origin = f"{parsed.scheme}://{parsed.netloc}".rstrip("/")
+                if referer_origin in ALLOWED_ORIGINS:
+                    return referer_origin
+        except Exception:
+            pass
+
+    return FRONTEND_BASE_URL
+
+
 def parse_labeled_url_list(value: str) -> List[tuple[Optional[str], str]]:
     raw = str(value or "").strip()
     if not raw:
@@ -5158,7 +5180,7 @@ def health() -> Dict[str, str]:
 
 
 @app.post("/api/auth/request-link")
-def request_magic_link(payload: AuthRequestIn) -> Dict[str, str]:
+def request_magic_link(payload: AuthRequestIn, request: Request = None) -> Dict[str, str]:
     email = payload.email.strip().lower()
     if not email:
         raise HTTPException(status_code=400, detail="Email is required")
@@ -5182,7 +5204,8 @@ def request_magic_link(payload: AuthRequestIn) -> Dict[str, str]:
         )
         conn.commit()
 
-    link = f"{FRONTEND_BASE_URL}/auth/verify?token={token}"
+    frontend_base = resolve_frontend_base_url(request)
+    link = f"{frontend_base}/auth/verify?token={token}"
     try:
         sent = send_resend_magic_link(email, link)
     except HTTPException:

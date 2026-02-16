@@ -6,6 +6,7 @@ from pathlib import Path
 import sys
 from urllib import error as urlerror
 from unittest.mock import patch
+from types import SimpleNamespace
 
 from fastapi import HTTPException, Response
 
@@ -228,6 +229,38 @@ class AdminPasswordAuthTests(unittest.TestCase):
 
         self.assertEqual(result["status"], "dev_link")
         self.assertIn("/auth/verify?token=", result["link"])
+
+    def test_request_magic_link_prefers_allowed_request_origin_for_link(self) -> None:
+        with patch.object(main, "require_session_role", return_value=None):
+            main.create_user(
+                main.UserIn(
+                    first_name="Origin",
+                    last_name="User",
+                    email="origin.user@example.com",
+                    phone="",
+                    job_title="Broker",
+                    organization="Legacy Brokers KC",
+                    role="broker",
+                    password="MagicPass123!",
+                ),
+                request=object(),
+            )
+
+        request = SimpleNamespace(headers={"origin": "https://broker-portal.vercel.app"})
+        with patch.object(main, "send_resend_magic_link", return_value=True) as send_mock:
+            with patch.object(main, "ALLOWED_ORIGINS", ["https://broker-portal.vercel.app"]):
+                result = main.request_magic_link(
+                    main.AuthRequestIn(email="origin.user@example.com"),
+                    request=request,
+                )
+
+        self.assertEqual(result["status"], "sent")
+        sent_args = send_mock.call_args.args
+        self.assertEqual(sent_args[0], "origin.user@example.com")
+        self.assertIn(
+            "https://broker-portal.vercel.app/auth/verify?token=",
+            sent_args[1],
+        )
 
     def test_send_resend_magic_link_surfaces_provider_error_message(self) -> None:
         http_error = urlerror.HTTPError(
