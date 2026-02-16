@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import csv
 import base64
+import html
 import hashlib
 import hmac
 import json
@@ -248,6 +249,10 @@ _allow_dev_magic_fallback_default = FRONTEND_BASE_URL.startswith("http://localho
 ALLOW_DEV_MAGIC_LINK_FALLBACK = os.getenv(
     "ALLOW_DEV_MAGIC_LINK_FALLBACK",
     "true" if _allow_dev_magic_fallback_default else "false",
+).strip().lower() in {"1", "true", "yes", "on"}
+RESEND_NOTIFICATION_EMAILS_ENABLED = os.getenv(
+    "RESEND_NOTIFICATION_EMAILS_ENABLED",
+    "true",
 ).strip().lower() in {"1", "true", "yes", "on"}
 
 app.add_middleware(
@@ -1975,8 +1980,9 @@ def create_notification(
     if not user_key:
         return
     cur = conn.cursor()
-    cur.execute("SELECT id FROM User WHERE id = ?", (user_key,))
-    if not cur.fetchone():
+    cur.execute("SELECT id, email FROM User WHERE id = ?", (user_key,))
+    user_row = cur.fetchone()
+    if not user_row:
         return
     cur.execute(
         """
@@ -1997,6 +2003,15 @@ def create_notification(
             None,
         ),
     )
+    recipient_email = str(user_row["email"] or "").strip().lower()
+    if recipient_email:
+        send_resend_notification_email(
+            recipient_email,
+            title=title,
+            body=body,
+            entity_type=entity_type,
+            entity_id=entity_id,
+        )
 
 
 def auth_user_payload(row: sqlite3.Row) -> AuthVerifyOut:
@@ -2097,7 +2112,14 @@ def revoke_user_sessions(conn: sqlite3.Connection, user_id: str) -> None:
     cur.execute("DELETE FROM AuthSession WHERE user_id = ?", (user_id,))
 
 
-def send_resend_magic_link(to_email: str, link: str) -> bool:
+def send_resend_email(
+    *,
+    to_email: str,
+    subject: str,
+    html_body: str,
+    text_body: Optional[str] = None,
+    raise_delivery_error: bool = False,
+) -> bool:
     api_key = os.getenv("RESEND_API_KEY", "").strip()
     from_email = os.getenv("RESEND_FROM_EMAIL", "").strip()
     if not api_key or not from_email:
@@ -2105,9 +2127,11 @@ def send_resend_magic_link(to_email: str, link: str) -> bool:
     payload = {
         "from": from_email,
         "to": [to_email],
-        "subject": "Your Level Health sign-in link",
-        "html": f"<p>Use this secure sign-in link:</p><p><a href=\"{link}\">{link}</a></p><p>This link expires in {MAGIC_LINK_DURATION_MINUTES} minutes.</p>",
+        "subject": subject,
+        "html": html_body,
     }
+    if text_body:
+        payload["text"] = text_body
     req = urlrequest.Request(
         "https://api.resend.com/emails",
         data=json.dumps(payload).encode("utf-8"),
@@ -2120,12 +2144,84 @@ def send_resend_magic_link(to_email: str, link: str) -> bool:
     try:
         with urlrequest.urlopen(req, timeout=10) as resp:
             if resp.status >= 300:
-                raise HTTPException(status_code=502, detail="Failed to send magic link email.")
+                if raise_delivery_error:
+                    raise HTTPException(status_code=502, detail="Failed to send email.")
+                return False
     except HTTPException:
-        raise
+        if raise_delivery_error:
+            raise
+        return False
     except Exception:
-        raise HTTPException(status_code=502, detail="Failed to send magic link email.")
+        if raise_delivery_error:
+            raise HTTPException(status_code=502, detail="Failed to send email.")
+        return False
     return True
+
+
+def send_resend_magic_link(to_email: str, link: str) -> bool:
+    safe_link = html.escape(link, quote=True)
+    return send_resend_email(
+        to_email=to_email,
+        subject="Your Level Health sign-in link",
+        html_body=(
+            "<p>Use this secure sign-in link:</p>"
+            f"<p><a href=\"{safe_link}\">{safe_link}</a></p>"
+            f"<p>This link expires in {MAGIC_LINK_DURATION_MINUTES} minutes.</p>"
+        ),
+        text_body=(
+            "Use this secure sign-in link:\n"
+            f"{link}\n\n"
+            f"This link expires in {MAGIC_LINK_DURATION_MINUTES} minutes."
+        ),
+        raise_delivery_error=True,
+    )
+
+
+def notification_entity_href(entity_type: Optional[str], entity_id: Optional[str]) -> Optional[str]:
+    entity_key = (entity_type or "").strip().lower()
+    entity_value = (entity_id or "").strip()
+    if not entity_value:
+        return None
+    if entity_key == "quote":
+        return f"{FRONTEND_BASE_URL}/quotes/{entity_value}"
+    if entity_key == "installation":
+        return f"{FRONTEND_BASE_URL}/implementations/{entity_value}"
+    return None
+
+
+def send_resend_notification_email(
+    to_email: str,
+    *,
+    title: str,
+    body: str,
+    entity_type: Optional[str] = None,
+    entity_id: Optional[str] = None,
+) -> bool:
+    if not RESEND_NOTIFICATION_EMAILS_ENABLED:
+        return False
+    safe_title = html.escape(title.strip() or "Level Health notification")
+    safe_body = html.escape(body.strip())
+    href = notification_entity_href(entity_type, entity_id)
+    safe_href = html.escape(href, quote=True) if href else None
+    html_body_parts = [
+        "<p>You have a new Level Health notification.</p>",
+        f"<p><strong>{safe_title}</strong></p>",
+        f"<p>{safe_body}</p>",
+    ]
+    if safe_href:
+        html_body_parts.append(f"<p><a href=\"{safe_href}\">Open in Broker Portal</a></p>")
+
+    text_body = f"{title.strip() or 'Level Health notification'}\n\n{body.strip()}"
+    if href:
+        text_body = f"{text_body}\n\nOpen in Broker Portal: {href}"
+
+    return send_resend_email(
+        to_email=to_email,
+        subject=f"Level Health notification: {title.strip() or 'Update'}",
+        html_body="".join(html_body_parts),
+        text_body=text_body,
+        raise_delivery_error=False,
+    )
 
 
 def create_auth_session(conn: sqlite3.Connection, user_id: str) -> str:

@@ -167,6 +167,66 @@ class AdminPasswordAuthTests(unittest.TestCase):
         self.assertEqual(exc.exception.status_code, 400)
         self.assertIn("Email already exists", str(exc.exception.detail))
 
+    def test_request_magic_link_sends_email_with_resend(self) -> None:
+        with patch.object(main, "require_session_role", return_value=None):
+            main.create_user(
+                main.UserIn(
+                    first_name="Magic",
+                    last_name="User",
+                    email="magic.user@example.com",
+                    phone="",
+                    job_title="Broker",
+                    organization="Legacy Brokers KC",
+                    role="broker",
+                    password="MagicPass123!",
+                ),
+                request=object(),
+            )
+
+        with patch.object(main, "send_resend_magic_link", return_value=True) as send_mock:
+            result = main.request_magic_link(main.AuthRequestIn(email="magic.user@example.com"))
+
+        self.assertEqual(result["status"], "sent")
+        send_mock.assert_called_once()
+        sent_args = send_mock.call_args.args
+        self.assertEqual(sent_args[0], "magic.user@example.com")
+        self.assertIn("/auth/verify?token=", sent_args[1])
+
+        with main.get_db() as conn:
+            cur = conn.cursor()
+            cur.execute("SELECT COUNT(*) AS cnt FROM AuthMagicLink WHERE email = ?", ("magic.user@example.com",))
+            self.assertEqual(cur.fetchone()["cnt"], 1)
+
+    def test_request_magic_link_returns_dev_link_when_delivery_fails_and_fallback_enabled(self) -> None:
+        with patch.object(main, "require_session_role", return_value=None):
+            main.create_user(
+                main.UserIn(
+                    first_name="Dev",
+                    last_name="User",
+                    email="dev.magic@example.com",
+                    phone="",
+                    job_title="Broker",
+                    organization="Legacy Brokers KC",
+                    role="broker",
+                    password="MagicPass123!",
+                ),
+                request=object(),
+            )
+
+        with patch.object(
+            main,
+            "send_resend_magic_link",
+            side_effect=HTTPException(status_code=502, detail="Failed to send email."),
+        ), patch.object(main, "ALLOW_DEV_MAGIC_LINK_FALLBACK", True), patch.object(
+            main,
+            "FRONTEND_BASE_URL",
+            "http://localhost:5173",
+        ):
+            result = main.request_magic_link(main.AuthRequestIn(email="dev.magic@example.com"))
+
+        self.assertEqual(result["status"], "dev_link")
+        self.assertIn("/auth/verify?token=", result["link"])
+
     def test_create_quote_uses_signed_in_user_identity(self) -> None:
         payload = main.QuoteCreate(
             company="Session Bound Group",

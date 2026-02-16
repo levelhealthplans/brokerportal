@@ -214,6 +214,54 @@ class NotificationTests(unittest.TestCase):
             unread_after_all = main.get_notification_unread_count(request=object())
             self.assertEqual(unread_after_all.unread_count, 0)
 
+    def test_create_notification_sends_resend_email(self) -> None:
+        self._insert_user("target-user-4", "target4@example.com")
+
+        with main.get_db() as conn, patch.object(
+            main,
+            "send_resend_notification_email",
+            return_value=True,
+        ) as send_mock:
+            main.create_notification(
+                conn,
+                "target-user-4",
+                kind="quote_assigned",
+                title="Quote assigned",
+                body="Acme was assigned to you.",
+                entity_type="quote",
+                entity_id="quote-123",
+            )
+            conn.commit()
+
+        send_mock.assert_called_once_with(
+            "target4@example.com",
+            title="Quote assigned",
+            body="Acme was assigned to you.",
+            entity_type="quote",
+            entity_id="quote-123",
+        )
+
+    def test_create_notification_skips_resend_without_user_email(self) -> None:
+        self._insert_user("target-user-5", "")
+
+        with main.get_db() as conn, patch.object(
+            main,
+            "send_resend_notification_email",
+            return_value=True,
+        ) as send_mock:
+            main.create_notification(
+                conn,
+                "target-user-5",
+                kind="task_assigned",
+                title="Task assigned",
+                body="Task was assigned to you.",
+                entity_type="installation",
+                entity_id="install-123",
+            )
+            conn.commit()
+
+        send_mock.assert_not_called()
+
 
 if __name__ == "__main__":
     unittest.main()
