@@ -739,6 +739,132 @@ def fetch_org_by_domain(
     return cur.fetchone()
 
 
+DOMAIN_PATTERN = re.compile(r"^[a-z0-9][a-z0-9.-]*\.[a-z]{2,}$")
+
+
+def normalize_domain_candidate(value: Optional[str]) -> Optional[str]:
+    candidate = str(value or "").strip().lower()
+    if not candidate:
+        return None
+    if "@" in candidate:
+        candidate = email_domain(candidate) or ""
+    candidate = candidate.strip().strip(".")
+    if not candidate or " " in candidate or "/" in candidate:
+        return None
+    if not DOMAIN_PATTERN.match(candidate):
+        return None
+    return candidate
+
+
+def upsert_organization(
+    conn: sqlite3.Connection,
+    *,
+    name: Optional[str],
+    org_type: str,
+    domain: Optional[str],
+) -> bool:
+    normalized_type = (org_type or "").strip().lower()
+    normalized_domain = normalize_domain_candidate(domain)
+    normalized_name = (name or "").strip()
+    if normalized_type not in {"broker", "sponsor"} or not normalized_domain:
+        return False
+    if not normalized_name:
+        normalized_name = normalized_domain
+    cur = conn.cursor()
+    cur.execute(
+        """
+        SELECT id, name
+        FROM Organization
+        WHERE lower(type) = ? AND lower(domain) = ?
+        ORDER BY created_at ASC
+        LIMIT 1
+        """,
+        (normalized_type, normalized_domain),
+    )
+    existing = cur.fetchone()
+    if existing:
+        existing_name = str(existing["name"] or "").strip()
+        if (
+            normalized_name
+            and existing_name.lower() != normalized_name.lower()
+            and (not existing_name or existing_name.lower() == normalized_domain)
+        ):
+            cur.execute(
+                "UPDATE Organization SET name = ? WHERE id = ?",
+                (normalized_name, existing["id"]),
+            )
+            return True
+        return False
+    cur.execute(
+        """
+        INSERT INTO Organization (id, name, type, domain, created_at)
+        VALUES (?, ?, ?, ?, ?)
+        """,
+        (str(uuid.uuid4()), normalized_name, normalized_type, normalized_domain, now_iso()),
+    )
+    return True
+
+
+def sync_organizations_from_records(conn: sqlite3.Connection) -> None:
+    changed = False
+
+    for domain, name in BROKER_DOMAIN_MAP.items():
+        if upsert_organization(conn, name=name, org_type="broker", domain=domain):
+            changed = True
+
+    cur = conn.cursor()
+    cur.execute("SELECT role, email, organization FROM User")
+    for row in cur.fetchall():
+        role_value = (row["role"] or "").strip().lower()
+        user_domain = normalize_domain_candidate(row["email"])
+        user_org = str(row["organization"] or "").strip()
+        if role_value in {"admin", "broker"} and user_domain:
+            broker_name = user_org or BROKER_DOMAIN_MAP.get(user_domain) or user_domain
+            if upsert_organization(
+                conn,
+                name=broker_name,
+                org_type="broker",
+                domain=user_domain,
+            ):
+                changed = True
+        if role_value == "sponsor":
+            sponsor_domain = normalize_domain_candidate(user_org) or user_domain
+            if sponsor_domain and upsert_organization(
+                conn,
+                name=sponsor_domain,
+                org_type="sponsor",
+                domain=sponsor_domain,
+            ):
+                changed = True
+
+    cur.execute("SELECT broker_org, broker_email, sponsor_domain, employer_domain FROM Quote")
+    for row in cur.fetchall():
+        broker_domain = normalize_domain_candidate(row["broker_email"])
+        broker_name = str(row["broker_org"] or "").strip() or (
+            BROKER_DOMAIN_MAP.get(broker_domain or "") if broker_domain else None
+        )
+        if broker_domain and upsert_organization(
+            conn,
+            name=broker_name or broker_domain,
+            org_type="broker",
+            domain=broker_domain,
+        ):
+            changed = True
+        sponsor_domain = normalize_domain_candidate(row["sponsor_domain"]) or normalize_domain_candidate(
+            row["employer_domain"]
+        )
+        if sponsor_domain and upsert_organization(
+            conn,
+            name=sponsor_domain,
+            org_type="sponsor",
+            domain=sponsor_domain,
+        ):
+            changed = True
+
+    if changed:
+        conn.commit()
+
+
 def fetch_user_by_email(conn: sqlite3.Connection, email: Optional[str]) -> Optional[sqlite3.Row]:
     normalized_email = (email or "").strip().lower()
     if not normalized_email:
@@ -1264,6 +1390,7 @@ def init_db() -> None:
         if cur.fetchone()["cnt"] == 0:
             seed_organizations(conn)
         ensure_default_admin_user(conn)
+        sync_organizations_from_records(conn)
 
 
 def ensure_default_admin_user(conn: sqlite3.Connection) -> None:
@@ -6094,6 +6221,7 @@ def get_quote_detail(
 def list_organizations(request: Request, org_type: Optional[str] = None) -> List[OrganizationOut]:
     with get_db() as conn:
         require_session_role(conn, request, {"admin"})
+        sync_organizations_from_records(conn)
         cur = conn.cursor()
         if org_type:
             cur.execute(
