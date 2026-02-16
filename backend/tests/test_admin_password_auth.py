@@ -253,6 +253,39 @@ class AdminPasswordAuthTests(unittest.TestCase):
         self.assertEqual(exc.exception.status_code, 502)
         self.assertIn("from address is not verified", str(exc.exception.detail).lower())
 
+    def test_send_resend_magic_link_surfaces_cloudflare_1010_message(self) -> None:
+        html_error = b"""
+        <html><body>
+        <h1>Error code 1010</h1>
+        <p>Access denied</p>
+        <p>Ray ID: 8f7a8b9c0d1e2f3a</p>
+        </body></html>
+        """
+        http_error = urlerror.HTTPError(
+            url="https://api.resend.com/emails",
+            code=403,
+            msg="Forbidden",
+            hdrs=None,
+            fp=io.BytesIO(html_error),
+        )
+        with patch.dict(
+            "os.environ",
+            {
+                "RESEND_API_KEY": "test-key",
+                "RESEND_FROM_EMAIL": "no-reply@example.com",
+            },
+            clear=False,
+        ), patch.object(main.urlrequest, "urlopen", side_effect=http_error):
+            with self.assertRaises(HTTPException) as exc:
+                main.send_resend_magic_link(
+                    "recipient@example.com",
+                    "http://localhost:5173/auth/verify?token=abc",
+                )
+        self.assertEqual(exc.exception.status_code, 502)
+        self.assertIn("cloudflare", str(exc.exception.detail).lower())
+        self.assertIn("1010", str(exc.exception.detail))
+        self.assertIn("8f7a8b9c0d1e2f3a", str(exc.exception.detail))
+
     def test_create_quote_uses_signed_in_user_identity(self) -> None:
         payload = main.QuoteCreate(
             company="Session Bound Group",

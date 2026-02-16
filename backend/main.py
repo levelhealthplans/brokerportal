@@ -2120,6 +2120,19 @@ def parse_resend_error_message(exc: Exception) -> str:
             raw_body = exc.read().decode("utf-8", errors="ignore").strip()
         except Exception:
             raw_body = ""
+        lowered_body = raw_body.lower()
+        if "error code 1010" in lowered_body or "error 1010" in lowered_body:
+            ray_id_match = re.search(r"ray id[:\s]+([a-z0-9\-]+)", raw_body, flags=re.IGNORECASE)
+            ray_id = ray_id_match.group(1).strip() if ray_id_match else ""
+            if ray_id:
+                return (
+                    "Resend request was blocked by Cloudflare (error 1010). "
+                    f"Ray ID: {ray_id}. Contact Resend support and provide this Ray ID."
+                )
+            return (
+                "Resend request was blocked by Cloudflare (error 1010). "
+                "Contact Resend support for allowlisting."
+            )
         if raw_body:
             try:
                 parsed = json.loads(raw_body)
@@ -2171,6 +2184,8 @@ def send_resend_email(
         headers={
             "Authorization": f"Bearer {api_key}",
             "Content-Type": "application/json",
+            "Accept": "application/json",
+            "User-Agent": "LevelHealthBrokerPortal/1.0",
         },
         method="POST",
     )
