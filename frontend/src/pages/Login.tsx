@@ -1,7 +1,7 @@
 import { useState } from "react";
 import { useAccess } from "../access";
 import { useNavigate } from "react-router-dom";
-import { requestMagicLink } from "../api";
+import { requestAccess, requestMagicLink } from "../api";
 
 export default function Login() {
   const { login } = useAccess();
@@ -14,6 +14,17 @@ export default function Login() {
   const [devMagicLink, setDevMagicLink] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
   const [magicBusy, setMagicBusy] = useState(false);
+  const [accessOpen, setAccessOpen] = useState(false);
+  const [accessBusy, setAccessBusy] = useState(false);
+  const [accessError, setAccessError] = useState<string | null>(null);
+  const [accessMessage, setAccessMessage] = useState<string | null>(null);
+  const [accessForm, setAccessForm] = useState({
+    first_name: "",
+    last_name: "",
+    email: "",
+    requested_role: "broker" as "broker" | "sponsor",
+    organization: "",
+  });
 
   const onSubmit = async (event: React.FormEvent) => {
     event.preventDefault();
@@ -50,6 +61,43 @@ export default function Login() {
       setMagicError(err.message || "Unable to send magic link.");
     } finally {
       setMagicBusy(false);
+    }
+  };
+
+  const onAccessFieldChange = (field: keyof typeof accessForm, value: string) => {
+    setAccessForm((prev) => ({ ...prev, [field]: value }));
+  };
+
+  const onToggleAccess = () => {
+    setAccessOpen((prev) => !prev);
+    setAccessError(null);
+    setAccessMessage(null);
+    if (!accessForm.email && email.trim()) {
+      onAccessFieldChange("email", email.trim().toLowerCase());
+    }
+  };
+
+  const onSubmitAccessRequest = async (event: React.FormEvent) => {
+    event.preventDefault();
+    setAccessBusy(true);
+    setAccessError(null);
+    setAccessMessage(null);
+    try {
+      const result = await requestAccess({
+        first_name: accessForm.first_name.trim(),
+        last_name: accessForm.last_name.trim(),
+        email: accessForm.email.trim().toLowerCase(),
+        requested_role: accessForm.requested_role,
+        organization: accessForm.organization.trim() || undefined,
+      });
+      setAccessMessage(result.message);
+      if (result.status === "approved" || result.status === "existing_user") {
+        setEmail(accessForm.email.trim().toLowerCase());
+      }
+    } catch (err: any) {
+      setAccessError(err.message || "Unable to submit access request.");
+    } finally {
+      setAccessBusy(false);
     }
   };
 
@@ -113,6 +161,74 @@ export default function Login() {
                 </a>
               </div>
             )}
+            <div className="inline-actions" style={{ marginTop: 12 }}>
+              <button className="button ghost" type="button" onClick={onToggleAccess}>
+                {accessOpen ? "Hide Access Request" : "Need an account? Request Access"}
+              </button>
+            </div>
+            {accessOpen && (
+              <form className="login-form-grid" style={{ marginTop: 12 }} onSubmit={onSubmitAccessRequest}>
+                <label>
+                  First Name
+                  <input
+                    required
+                    value={accessForm.first_name}
+                    onChange={(e) => onAccessFieldChange("first_name", e.target.value)}
+                    placeholder="First name"
+                  />
+                </label>
+                <label>
+                  Last Name
+                  <input
+                    required
+                    value={accessForm.last_name}
+                    onChange={(e) => onAccessFieldChange("last_name", e.target.value)}
+                    placeholder="Last name"
+                  />
+                </label>
+                <label>
+                  Work Email
+                  <input
+                    type="email"
+                    required
+                    value={accessForm.email}
+                    onChange={(e) => onAccessFieldChange("email", e.target.value)}
+                    placeholder="you@company.com"
+                  />
+                </label>
+                <label>
+                  Requested Role
+                  <select
+                    value={accessForm.requested_role}
+                    onChange={(e) =>
+                      onAccessFieldChange("requested_role", e.target.value as "broker" | "sponsor")
+                    }
+                  >
+                    <option value="broker">Broker</option>
+                    <option value="sponsor">Plan Sponsor</option>
+                  </select>
+                </label>
+                <label>
+                  Organization / Domain (Optional)
+                  <input
+                    value={accessForm.organization}
+                    onChange={(e) => onAccessFieldChange("organization", e.target.value)}
+                    placeholder="legacybrokerskc.com"
+                  />
+                </label>
+                <div className="inline-actions">
+                  <button className="button secondary" type="submit" disabled={accessBusy}>
+                    {accessBusy ? "Submitting..." : "Submit Access Request"}
+                  </button>
+                </div>
+                <div className="helper">
+                  Broker requests from known broker domains are approved automatically. Sponsor requests go to admin
+                  review.
+                </div>
+              </form>
+            )}
+            {accessError && <div className="notice login-notice">{accessError}</div>}
+            {accessMessage && <div className="notice notice-success login-notice">{accessMessage}</div>}
           </div>
         </section>
       </div>

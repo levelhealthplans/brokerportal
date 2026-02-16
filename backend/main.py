@@ -142,6 +142,8 @@ TASK_STATE_CANONICAL = {
     "done": "Complete",
 }
 ALLOWED_USER_ROLES = {"admin", "broker", "sponsor"}
+ALLOWED_ACCESS_REQUEST_ROLES = {"broker", "sponsor"}
+ALLOWED_ACCESS_REQUEST_STATUSES = {"pending", "approved", "rejected"}
 PASSWORD_MIN_LENGTH = 8
 HUBSPOT_API_BASE = "https://api.hubapi.com"
 HUBSPOT_OAUTH_AUTHORIZE_URL = "https://app.hubspot.com/oauth/authorize"
@@ -739,6 +741,21 @@ def fetch_org_by_domain(
     return cur.fetchone()
 
 
+def broker_org_name_for_domain(conn: sqlite3.Connection, domain: Optional[str]) -> Optional[str]:
+    normalized_domain = normalize_domain_candidate(domain)
+    if not normalized_domain:
+        return None
+    org = fetch_org_by_domain(conn, "broker", normalized_domain)
+    if org:
+        name = str(org["name"] or "").strip()
+        if name:
+            return name
+    mapped_name = BROKER_DOMAIN_MAP.get(normalized_domain)
+    if mapped_name:
+        return mapped_name
+    return None
+
+
 DOMAIN_PATTERN = re.compile(r"^[a-z0-9][a-z0-9.-]*\.[a-z]{2,}$")
 
 
@@ -1166,6 +1183,36 @@ def init_db() -> None:
         )
         cur.execute(
             """
+            CREATE TABLE IF NOT EXISTS AccessRequest(
+                id TEXT PRIMARY KEY,
+                first_name TEXT,
+                last_name TEXT,
+                email TEXT,
+                requested_role TEXT,
+                organization TEXT,
+                requested_domain TEXT,
+                status TEXT,
+                review_note TEXT,
+                created_at TEXT,
+                reviewed_at TEXT,
+                reviewed_by_user_id TEXT
+            )
+            """
+        )
+        cur.execute(
+            """
+            CREATE INDEX IF NOT EXISTS idx_access_request_status_created
+            ON AccessRequest(status, created_at DESC)
+            """
+        )
+        cur.execute(
+            """
+            CREATE INDEX IF NOT EXISTS idx_access_request_email_created
+            ON AccessRequest(email, created_at DESC)
+            """
+        )
+        cur.execute(
+            """
             CREATE TABLE IF NOT EXISTS InstallationDocument(
                 id TEXT PRIMARY KEY,
                 installation_id TEXT,
@@ -1323,6 +1370,43 @@ def init_db() -> None:
             cur.execute("ALTER TABLE User ADD COLUMN password_salt TEXT")
         if "password_hash" not in user_cols:
             cur.execute("ALTER TABLE User ADD COLUMN password_hash TEXT")
+
+        cur.execute("PRAGMA table_info(AccessRequest)")
+        access_request_cols = {row["name"] for row in cur.fetchall()}
+        if "first_name" not in access_request_cols:
+            cur.execute("ALTER TABLE AccessRequest ADD COLUMN first_name TEXT")
+        if "last_name" not in access_request_cols:
+            cur.execute("ALTER TABLE AccessRequest ADD COLUMN last_name TEXT")
+        if "email" not in access_request_cols:
+            cur.execute("ALTER TABLE AccessRequest ADD COLUMN email TEXT")
+        if "requested_role" not in access_request_cols:
+            cur.execute("ALTER TABLE AccessRequest ADD COLUMN requested_role TEXT")
+        if "organization" not in access_request_cols:
+            cur.execute("ALTER TABLE AccessRequest ADD COLUMN organization TEXT")
+        if "requested_domain" not in access_request_cols:
+            cur.execute("ALTER TABLE AccessRequest ADD COLUMN requested_domain TEXT")
+        if "status" not in access_request_cols:
+            cur.execute("ALTER TABLE AccessRequest ADD COLUMN status TEXT")
+        if "review_note" not in access_request_cols:
+            cur.execute("ALTER TABLE AccessRequest ADD COLUMN review_note TEXT")
+        if "created_at" not in access_request_cols:
+            cur.execute("ALTER TABLE AccessRequest ADD COLUMN created_at TEXT")
+        if "reviewed_at" not in access_request_cols:
+            cur.execute("ALTER TABLE AccessRequest ADD COLUMN reviewed_at TEXT")
+        if "reviewed_by_user_id" not in access_request_cols:
+            cur.execute("ALTER TABLE AccessRequest ADD COLUMN reviewed_by_user_id TEXT")
+        cur.execute(
+            """
+            CREATE INDEX IF NOT EXISTS idx_access_request_status_created
+            ON AccessRequest(status, created_at DESC)
+            """
+        )
+        cur.execute(
+            """
+            CREATE INDEX IF NOT EXISTS idx_access_request_email_created
+            ON AccessRequest(email, created_at DESC)
+            """
+        )
 
         cur.execute("PRAGMA table_info(AuthMagicLink)")
         magic_cols = {row["name"] for row in cur.fetchall()}
@@ -2057,6 +2141,40 @@ class AuthRequestIn(BaseModel):
     email: str
 
 
+class AccessRequestIn(BaseModel):
+    first_name: str
+    last_name: str
+    email: str
+    requested_role: str = "broker"
+    organization: Optional[str] = None
+
+
+class AccessRequestOut(BaseModel):
+    status: str
+    message: str
+
+
+class AccessRequestAdminOut(BaseModel):
+    id: str
+    first_name: str
+    last_name: str
+    email: str
+    requested_role: str
+    organization: Optional[str]
+    requested_domain: Optional[str]
+    status: str
+    review_note: Optional[str]
+    created_at: str
+    reviewed_at: Optional[str]
+    reviewed_by_user_id: Optional[str]
+
+
+class AccessRequestDecisionIn(BaseModel):
+    role: Optional[str] = None
+    organization: Optional[str] = None
+    note: Optional[str] = None
+
+
 class AuthLoginIn(BaseModel):
     email: str
     password: str
@@ -2120,6 +2238,81 @@ def to_notification_out(row: sqlite3.Row) -> NotificationOut:
     data = dict(row)
     data["is_read"] = bool(data.get("is_read"))
     return NotificationOut(**data)
+
+
+def to_access_request_admin_out(row: sqlite3.Row) -> AccessRequestAdminOut:
+    data = dict(row)
+    return AccessRequestAdminOut(**data)
+
+
+def ensure_access_request_user(
+    conn: sqlite3.Connection,
+    *,
+    first_name: str,
+    last_name: str,
+    email: str,
+    role: str,
+    organization: str,
+) -> sqlite3.Row:
+    normalized_email = normalize_user_email(email)
+    normalized_role = normalize_user_role(role)
+    if normalized_role not in {"broker", "sponsor"}:
+        raise HTTPException(status_code=400, detail="Access request users must be broker or sponsor")
+    now = now_iso()
+    cur = conn.cursor()
+    existing = fetch_user_by_email(conn, normalized_email)
+    if existing:
+        next_role = existing["role"] if (existing["role"] or "").strip().lower() == "admin" else normalized_role
+        next_org = organization.strip() or (existing["organization"] or "").strip()
+        cur.execute(
+            """
+            UPDATE User
+            SET first_name = ?, last_name = ?, organization = ?, role = ?, updated_at = ?
+            WHERE id = ?
+            """,
+            (
+                first_name.strip(),
+                last_name.strip(),
+                next_org,
+                next_role,
+                now,
+                existing["id"],
+            ),
+        )
+        cur.execute("SELECT * FROM User WHERE id = ?", (existing["id"],))
+        updated = cur.fetchone()
+        if not updated:
+            raise HTTPException(status_code=500, detail="Failed to update access request user")
+        return updated
+
+    user_id = str(uuid.uuid4())
+    cur.execute(
+        """
+        INSERT INTO User (
+            id, first_name, last_name, email, phone, job_title, organization, role,
+            password_salt, password_hash, created_at, updated_at
+        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+        """,
+        (
+            user_id,
+            first_name.strip(),
+            last_name.strip(),
+            normalized_email,
+            "",
+            "",
+            organization.strip(),
+            normalized_role,
+            None,
+            None,
+            now,
+            now,
+        ),
+    )
+    cur.execute("SELECT * FROM User WHERE id = ?", (user_id,))
+    created = cur.fetchone()
+    if not created:
+        raise HTTPException(status_code=500, detail="Failed to create access request user")
+    return created
 
 
 def create_notification(
@@ -2246,6 +2439,22 @@ def normalize_user_role(role: Optional[str]) -> str:
     if value not in ALLOWED_USER_ROLES:
         allowed = ", ".join(sorted(ALLOWED_USER_ROLES))
         raise HTTPException(status_code=400, detail=f"Role must be one of: {allowed}")
+    return value
+
+
+def normalize_access_request_role(role: Optional[str]) -> str:
+    value = (role or "").strip().lower() or "broker"
+    if value not in ALLOWED_ACCESS_REQUEST_ROLES:
+        allowed = ", ".join(sorted(ALLOWED_ACCESS_REQUEST_ROLES))
+        raise HTTPException(status_code=400, detail=f"Requested role must be one of: {allowed}")
+    return value
+
+
+def normalize_access_request_status(status: Optional[str]) -> str:
+    value = (status or "").strip().lower()
+    if value not in ALLOWED_ACCESS_REQUEST_STATUSES:
+        allowed = ", ".join(sorted(ALLOWED_ACCESS_REQUEST_STATUSES))
+        raise HTTPException(status_code=400, detail=f"Status must be one of: {allowed}")
     return value
 
 
@@ -5313,6 +5522,125 @@ def health() -> Dict[str, str]:
     return {"status": "ok"}
 
 
+@app.post("/api/auth/request-access", response_model=AccessRequestOut)
+def request_access(payload: AccessRequestIn) -> AccessRequestOut:
+    first_name = (payload.first_name or "").strip()
+    last_name = (payload.last_name or "").strip()
+    if not first_name or not last_name:
+        raise HTTPException(status_code=400, detail="First and last name are required")
+    email = normalize_user_email(payload.email)
+    requested_role = normalize_access_request_role(payload.requested_role)
+    organization_value = (payload.organization or "").strip()
+    email_based_domain = email_domain(email)
+    requested_domain = (
+        normalize_domain_candidate(organization_value)
+        if requested_role == "sponsor"
+        else normalize_domain_candidate(email_based_domain)
+    )
+
+    with get_db() as conn:
+        existing_user = fetch_user_by_email(conn, email)
+        if existing_user:
+            return AccessRequestOut(
+                status="existing_user",
+                message="Account already exists. Use password login or request a magic link.",
+            )
+
+        if requested_role == "broker":
+            broker_name = broker_org_name_for_domain(conn, email_based_domain)
+            if broker_name and email_based_domain:
+                ensure_access_request_user(
+                    conn,
+                    first_name=first_name,
+                    last_name=last_name,
+                    email=email,
+                    role="broker",
+                    organization=broker_name,
+                )
+                sync_organizations_from_records(conn)
+                conn.commit()
+                return AccessRequestOut(
+                    status="approved",
+                    message="Access approved. Request a magic link to sign in.",
+                )
+
+        now = now_iso()
+        cur = conn.cursor()
+        cur.execute(
+            """
+            SELECT id
+            FROM AccessRequest
+            WHERE email = ? AND status = 'pending'
+            ORDER BY created_at DESC
+            LIMIT 1
+            """,
+            (email,),
+        )
+        pending = cur.fetchone()
+        if pending:
+            access_request_id = str(pending["id"])
+            cur.execute(
+                """
+                UPDATE AccessRequest
+                SET first_name = ?, last_name = ?, requested_role = ?, organization = ?,
+                    requested_domain = ?, review_note = NULL, reviewed_at = NULL, reviewed_by_user_id = NULL
+                WHERE id = ?
+                """,
+                (
+                    first_name,
+                    last_name,
+                    requested_role,
+                    organization_value or None,
+                    requested_domain,
+                    access_request_id,
+                ),
+            )
+        else:
+            access_request_id = str(uuid.uuid4())
+            cur.execute(
+                """
+                INSERT INTO AccessRequest (
+                    id, first_name, last_name, email, requested_role, organization, requested_domain,
+                    status, review_note, created_at, reviewed_at, reviewed_by_user_id
+                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                """,
+                (
+                    access_request_id,
+                    first_name,
+                    last_name,
+                    email,
+                    requested_role,
+                    organization_value or None,
+                    requested_domain,
+                    "pending",
+                    None,
+                    now,
+                    None,
+                    None,
+                ),
+            )
+
+        cur.execute("SELECT id FROM User WHERE role = 'admin' ORDER BY created_at ASC")
+        admin_rows = cur.fetchall()
+        requester_display = f"{first_name} {last_name}".strip()
+        for admin_row in admin_rows:
+            create_notification(
+                conn,
+                str(admin_row["id"] or "").strip() or None,
+                kind="access_request",
+                title="Access request pending",
+                body=f"{requester_display} requested {requested_role} access for {email}.",
+                entity_type="access_request",
+                entity_id=access_request_id,
+            )
+
+        conn.commit()
+    return AccessRequestOut(
+        status="pending_review",
+        message="Access request submitted for admin review.",
+    )
+
+
 @app.post("/api/auth/request-link")
 def request_magic_link(payload: AuthRequestIn, request: Request = None) -> Dict[str, str]:
     email = payload.email.strip().lower()
@@ -6469,6 +6797,122 @@ def assign_quotes_to_org(org_id: str, payload: OrganizationAssignIn, request: Re
     return {"status": "assigned"}
 
 
+@app.get("/api/admin/access-requests", response_model=List[AccessRequestAdminOut])
+def list_access_requests(request: Request, status: Optional[str] = None, limit: int = 100) -> List[AccessRequestAdminOut]:
+    with get_db() as conn:
+        require_session_role(conn, request, {"admin"})
+        cur = conn.cursor()
+        query = "SELECT * FROM AccessRequest"
+        params: List[Any] = []
+        if status is not None:
+            normalized_status = normalize_access_request_status(status)
+            query += " WHERE status = ?"
+            params.append(normalized_status)
+        max_limit = max(1, min(500, int(limit)))
+        query += " ORDER BY created_at DESC LIMIT ?"
+        params.append(max_limit)
+        cur.execute(query, params)
+        rows = cur.fetchall()
+    return [to_access_request_admin_out(row) for row in rows]
+
+
+@app.post("/api/admin/access-requests/{access_request_id}/approve", response_model=AccessRequestAdminOut)
+def approve_access_request(
+    access_request_id: str,
+    payload: AccessRequestDecisionIn,
+    request: Request,
+) -> AccessRequestAdminOut:
+    with get_db() as conn:
+        reviewer = require_session_role(conn, request, {"admin"})
+        reviewer_id = str(reviewer["id"] or "").strip() if reviewer else None
+        cur = conn.cursor()
+        cur.execute("SELECT * FROM AccessRequest WHERE id = ?", (access_request_id,))
+        row = cur.fetchone()
+        if not row:
+            raise HTTPException(status_code=404, detail="Access request not found")
+        if (row["status"] or "").strip().lower() != "pending":
+            raise HTTPException(status_code=400, detail="Only pending access requests can be approved")
+
+        approved_role = normalize_access_request_role(payload.role or row["requested_role"] or "broker")
+        approved_email = normalize_user_email(row["email"])
+        first_name = str(row["first_name"] or "").strip() or "User"
+        last_name = str(row["last_name"] or "").strip() or "Request"
+        requested_org = str(row["organization"] or "").strip()
+        approved_org_input = (payload.organization or "").strip()
+        email_domain_value = email_domain(approved_email)
+
+        if approved_role == "broker":
+            approved_org = approved_org_input or broker_org_name_for_domain(conn, email_domain_value) or requested_org
+            if not approved_org:
+                approved_org = (email_domain_value or "").strip()
+        else:
+            sponsor_domain = (
+                normalize_domain_candidate(approved_org_input)
+                or normalize_domain_candidate(row["requested_domain"])
+                or normalize_domain_candidate(requested_org)
+                or normalize_domain_candidate(email_domain_value)
+            )
+            if not sponsor_domain:
+                raise HTTPException(status_code=400, detail="A sponsor domain is required to approve sponsor access")
+            approved_org = sponsor_domain
+
+        ensure_access_request_user(
+            conn,
+            first_name=first_name,
+            last_name=last_name,
+            email=approved_email,
+            role=approved_role,
+            organization=approved_org,
+        )
+
+        review_note = (payload.note or "").strip() or None
+        cur.execute(
+            """
+            UPDATE AccessRequest
+            SET status = ?, review_note = ?, reviewed_at = ?, reviewed_by_user_id = ?
+            WHERE id = ?
+            """,
+            ("approved", review_note, now_iso(), reviewer_id or None, access_request_id),
+        )
+        sync_organizations_from_records(conn)
+        conn.commit()
+        cur.execute("SELECT * FROM AccessRequest WHERE id = ?", (access_request_id,))
+        updated = cur.fetchone()
+    return to_access_request_admin_out(updated)
+
+
+@app.post("/api/admin/access-requests/{access_request_id}/reject", response_model=AccessRequestAdminOut)
+def reject_access_request(
+    access_request_id: str,
+    payload: AccessRequestDecisionIn,
+    request: Request,
+) -> AccessRequestAdminOut:
+    with get_db() as conn:
+        reviewer = require_session_role(conn, request, {"admin"})
+        reviewer_id = str(reviewer["id"] or "").strip() if reviewer else None
+        cur = conn.cursor()
+        cur.execute("SELECT * FROM AccessRequest WHERE id = ?", (access_request_id,))
+        row = cur.fetchone()
+        if not row:
+            raise HTTPException(status_code=404, detail="Access request not found")
+        if (row["status"] or "").strip().lower() != "pending":
+            raise HTTPException(status_code=400, detail="Only pending access requests can be rejected")
+
+        review_note = (payload.note or "").strip() or None
+        cur.execute(
+            """
+            UPDATE AccessRequest
+            SET status = ?, review_note = ?, reviewed_at = ?, reviewed_by_user_id = ?
+            WHERE id = ?
+            """,
+            ("rejected", review_note, now_iso(), reviewer_id or None, access_request_id),
+        )
+        conn.commit()
+        cur.execute("SELECT * FROM AccessRequest WHERE id = ?", (access_request_id,))
+        updated = cur.fetchone()
+    return to_access_request_admin_out(updated)
+
+
 @app.get("/api/users", response_model=List[UserOut])
 def list_users(request: Request) -> List[UserOut]:
     with get_db() as conn:
@@ -6515,6 +6959,7 @@ def create_user(payload: UserIn, request: Request) -> UserOut:
             )
         except sqlite3.IntegrityError:
             raise HTTPException(status_code=400, detail="Email already exists")
+        sync_organizations_from_records(conn)
         conn.commit()
         cur.execute("SELECT * FROM User WHERE id = ?", (user_id,))
         row = cur.fetchone()
@@ -6571,6 +7016,7 @@ def update_user(user_id: str, payload: UserUpdate, request: Request) -> UserOut:
             raise HTTPException(status_code=400, detail="Email already exists")
         if password_changed:
             revoke_user_sessions(conn, user_id)
+        sync_organizations_from_records(conn)
         conn.commit()
         cur.execute("SELECT * FROM User WHERE id = ?", (user_id,))
         row = cur.fetchone()

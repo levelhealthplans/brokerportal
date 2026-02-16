@@ -1,12 +1,16 @@
 import { useEffect, useMemo, useState } from "react";
 import {
+  AdminAccessRequest,
+  approveAccessRequest,
   assignUserQuotes,
   assignUserTasks,
   createUser,
   deleteUser,
+  getAdminAccessRequests,
   getQuotes,
   getTasks,
   getUsers,
+  rejectAccessRequest,
   updateUser,
   User,
 } from "../api";
@@ -17,6 +21,8 @@ import { useAutoDismissMessage } from "../hooks/useAutoDismissMessage";
 export default function Users() {
   const { email } = useAccess();
   const [users, setUsers] = useState<User[]>([]);
+  const [accessRequests, setAccessRequests] = useState<AdminAccessRequest[]>([]);
+  const [accessRequestBusyId, setAccessRequestBusyId] = useState<string | null>(null);
   const [quotes, setQuotes] = useState<
     { id: string; company: string; assigned_user_id?: string | null }[]
   >([]);
@@ -70,6 +76,9 @@ export default function Users() {
     getUsers()
       .then(setUsers)
       .catch((err) => setError(err.message));
+    getAdminAccessRequests("pending", 200)
+      .then(setAccessRequests)
+      .catch(() => setAccessRequests([]));
     getQuotes({ role: "admin", email })
       .then((items) =>
         setQuotes(
@@ -282,6 +291,41 @@ export default function Users() {
     }
   };
 
+  const handleApproveAccessRequest = async (item: AdminAccessRequest) => {
+    setError(null);
+    setStatusMessage(null);
+    setAccessRequestBusyId(item.id);
+    try {
+      await approveAccessRequest(item.id, {
+        role: item.requested_role,
+        organization: item.organization || item.requested_domain || undefined,
+      });
+      setStatusMessage(`Access approved for ${item.first_name} ${item.last_name}.`);
+      load();
+    } catch (err: any) {
+      setError(err.message || "Failed to approve access request.");
+    } finally {
+      setAccessRequestBusyId(null);
+    }
+  };
+
+  const handleRejectAccessRequest = async (item: AdminAccessRequest) => {
+    const confirmed = window.confirm(`Reject access request for ${item.first_name} ${item.last_name}?`);
+    if (!confirmed) return;
+    setError(null);
+    setStatusMessage(null);
+    setAccessRequestBusyId(item.id);
+    try {
+      await rejectAccessRequest(item.id, {});
+      setStatusMessage(`Access request rejected for ${item.first_name} ${item.last_name}.`);
+      load();
+    } catch (err: any) {
+      setError(err.message || "Failed to reject access request.");
+    } finally {
+      setAccessRequestBusyId(null);
+    }
+  };
+
   const pagination = useMemo(() => paginateItems(users, page), [users, page]);
 
   useEffect(() => {
@@ -312,6 +356,64 @@ export default function Users() {
         >
           {statusMessage}
         </div>
+      )}
+
+      {accessRequests.length > 0 && (
+        <section className="section" style={{ marginBottom: 16 }}>
+          <h3 style={{ margin: "0 0 10px" }}>Pending Access Requests</h3>
+          <div className="table-scroll">
+            <table className="table slim">
+              <thead>
+                <tr>
+                  <th>Name</th>
+                  <th>Email</th>
+                  <th>Requested Role</th>
+                  <th>Org / Domain</th>
+                  <th>Requested</th>
+                  <th>Actions</th>
+                </tr>
+              </thead>
+              <tbody>
+                {accessRequests.map((item) => {
+                  const busy = accessRequestBusyId === item.id;
+                  return (
+                    <tr key={item.id}>
+                      <td>{`${item.first_name} ${item.last_name}`}</td>
+                      <td>{item.email}</td>
+                      <td>{item.requested_role === "sponsor" ? "Plan Sponsor" : "Broker"}</td>
+                      <td>{item.organization || item.requested_domain || "-"}</td>
+                      <td>{new Date(item.created_at).toLocaleString()}</td>
+                      <td>
+                        <div className="inline-actions">
+                          <button
+                            className="button subtle"
+                            type="button"
+                            disabled={busy}
+                            onClick={() => {
+                              void handleApproveAccessRequest(item);
+                            }}
+                          >
+                            {busy ? "Working..." : "Approve"}
+                          </button>
+                          <button
+                            className="button ghost"
+                            type="button"
+                            disabled={busy}
+                            onClick={() => {
+                              void handleRejectAccessRequest(item);
+                            }}
+                          >
+                            Reject
+                          </button>
+                        </div>
+                      </td>
+                    </tr>
+                  );
+                })}
+              </tbody>
+            </table>
+          </div>
+        </section>
       )}
 
       {createModalOpen && (

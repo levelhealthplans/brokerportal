@@ -272,6 +272,40 @@ export type AuthProfileUpdate = {
   password?: string;
 };
 
+export type AccessRequestCreate = {
+  first_name: string;
+  last_name: string;
+  email: string;
+  requested_role: "broker" | "sponsor";
+  organization?: string;
+};
+
+export type AccessRequestResult = {
+  status: "approved" | "pending_review" | "existing_user";
+  message: string;
+};
+
+export type AdminAccessRequest = {
+  id: string;
+  first_name: string;
+  last_name: string;
+  email: string;
+  requested_role: "broker" | "sponsor";
+  organization?: string | null;
+  requested_domain?: string | null;
+  status: "pending" | "approved" | "rejected";
+  review_note?: string | null;
+  created_at: string;
+  reviewed_at?: string | null;
+  reviewed_by_user_id?: string | null;
+};
+
+export type AccessRequestDecision = {
+  role?: "broker" | "sponsor";
+  organization?: string;
+  note?: string;
+};
+
 export type NetworkMapping = {
   zip: string;
   network: string;
@@ -570,6 +604,14 @@ export function requestMagicLink(email: string) {
   });
 }
 
+export function requestAccess(payload: AccessRequestCreate) {
+  return request<AccessRequestResult>("/auth/request-access", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(payload),
+  });
+}
+
 export function loginWithPassword(email: string, password: string) {
   return request<AuthUser>("/auth/login", {
     method: "POST",
@@ -861,6 +903,29 @@ export function assignUserTasks(id: string, taskIds: string[]) {
     method: "POST",
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify({ task_ids: taskIds }),
+  });
+}
+
+export function getAdminAccessRequests(status = "pending", limit = 100) {
+  const params = new URLSearchParams();
+  if (status) params.set("status", status);
+  params.set("limit", String(limit));
+  return request<AdminAccessRequest[]>(`/admin/access-requests?${params.toString()}`);
+}
+
+export function approveAccessRequest(id: string, payload?: AccessRequestDecision) {
+  return request<AdminAccessRequest>(`/admin/access-requests/${id}/approve`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(payload || {}),
+  });
+}
+
+export function rejectAccessRequest(id: string, payload?: AccessRequestDecision) {
+  return request<AdminAccessRequest>(`/admin/access-requests/${id}/reject`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(payload || {}),
   });
 }
 
