@@ -44,8 +44,8 @@ git push
 2. Select this GitHub repo.
 3. Render will detect `render.yaml`.
 4. Before applying, set:
-   - `FRONTEND_BASE_URL` to your Vercel URL (example: `https://broker-portal.vercel.app`)
-   - `ALLOWED_ORIGINS` to your Vercel URL (example: `https://broker-portal.vercel.app`)
+   - `FRONTEND_BASE_URL` to your Vercel URL (example: `https://brokerportal-tau.vercel.app`)
+   - `ALLOWED_ORIGINS` to your Vercel URL (example: `https://brokerportal-tau.vercel.app`)
    - `ALLOWED_ORIGIN_REGEX` for preview deploys (example: `https://.*\\.vercel\\.app`)
    - `RESEND_API_KEY` to your Resend API key
    - `RESEND_FROM_EMAIL` to a verified sender (example: `no-reply@yourdomain.com`)
@@ -72,8 +72,8 @@ Commit and push that change.
 ### 5) Final env check
 
 In Render service env vars, confirm:
-- `FRONTEND_BASE_URL=https://broker-portal.vercel.app`
-- `ALLOWED_ORIGINS=https://broker-portal.vercel.app`
+- `FRONTEND_BASE_URL=https://brokerportal-tau.vercel.app`
+- `ALLOWED_ORIGINS=https://brokerportal-tau.vercel.app`
 - `ALLOWED_ORIGIN_REGEX=https://.*\\.vercel\\.app`
 - `DB_PATH=/var/data/app.db`
 - `UPLOADS_DIR=/var/data/uploads`

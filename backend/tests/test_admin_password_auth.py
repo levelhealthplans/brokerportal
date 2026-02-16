@@ -230,7 +230,7 @@ class AdminPasswordAuthTests(unittest.TestCase):
         self.assertEqual(result["status"], "dev_link")
         self.assertIn("/auth/verify?token=", result["link"])
 
-    def test_request_magic_link_prefers_allowed_request_origin_for_link(self) -> None:
+    def test_request_magic_link_uses_canonical_frontend_base_in_production(self) -> None:
         with patch.object(main, "require_session_role", return_value=None):
             main.create_user(
                 main.UserIn(
@@ -247,8 +247,16 @@ class AdminPasswordAuthTests(unittest.TestCase):
             )
 
         request = SimpleNamespace(headers={"origin": "https://broker-portal.vercel.app"})
-        with patch.object(main, "send_resend_magic_link", return_value=True) as send_mock:
-            with patch.object(main, "ALLOWED_ORIGINS", ["https://broker-portal.vercel.app"]):
+        with patch.object(main, "send_resend_magic_link", return_value=True) as send_mock, patch.object(
+            main,
+            "FRONTEND_BASE_URL",
+            "https://brokerportal-tau.vercel.app",
+        ):
+            with patch.object(
+                main,
+                "ALLOWED_ORIGINS",
+                ["https://broker-portal.vercel.app", "https://brokerportal-tau.vercel.app"],
+            ):
                 result = main.request_magic_link(
                     main.AuthRequestIn(email="origin.user@example.com"),
                     request=request,
@@ -258,7 +266,46 @@ class AdminPasswordAuthTests(unittest.TestCase):
         sent_args = send_mock.call_args.args
         self.assertEqual(sent_args[0], "origin.user@example.com")
         self.assertIn(
-            "https://broker-portal.vercel.app/auth/verify?token=",
+            "https://brokerportal-tau.vercel.app/auth/verify?token=",
+            sent_args[1],
+        )
+
+    def test_request_magic_link_uses_request_origin_for_local_frontend_base(self) -> None:
+        with patch.object(main, "require_session_role", return_value=None):
+            main.create_user(
+                main.UserIn(
+                    first_name="Local",
+                    last_name="Origin",
+                    email="local.origin@example.com",
+                    phone="",
+                    job_title="Broker",
+                    organization="Legacy Brokers KC",
+                    role="broker",
+                    password="MagicPass123!",
+                ),
+                request=object(),
+            )
+
+        request = SimpleNamespace(headers={"origin": "http://127.0.0.1:5173"})
+        with patch.object(main, "send_resend_magic_link", return_value=True) as send_mock, patch.object(
+            main,
+            "FRONTEND_BASE_URL",
+            "http://localhost:5173",
+        ), patch.object(
+            main,
+            "ALLOWED_ORIGINS",
+            ["http://localhost:5173", "http://127.0.0.1:5173"],
+        ):
+            result = main.request_magic_link(
+                main.AuthRequestIn(email="local.origin@example.com"),
+                request=request,
+            )
+
+        self.assertEqual(result["status"], "sent")
+        sent_args = send_mock.call_args.args
+        self.assertEqual(sent_args[0], "local.origin@example.com")
+        self.assertIn(
+            "http://127.0.0.1:5173/auth/verify?token=",
             sent_args[1],
         )
 

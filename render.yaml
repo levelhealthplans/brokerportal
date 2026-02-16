@@ -9,9 +9,9 @@ services:
       - key: PYTHON_VERSION
         value: 3.12.2
       - key: FRONTEND_BASE_URL
-        value: https://broker-portal.vercel.app
+        value: https://brokerportal-tau.vercel.app
       - key: ALLOWED_ORIGINS
-        value: https://broker-portal.vercel.app
+        value: https://brokerportal-tau.vercel.app
       - key: ALLOWED_ORIGIN_REGEX
         value: https://.*\\.vercel\\.app
       - key: DB_PATH

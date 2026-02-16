@@ -336,6 +336,13 @@ def parse_url_list(value: str) -> List[str]:
 
 
 def resolve_frontend_base_url(request: Optional[Request] = None) -> str:
+    # In non-local environments, always use the configured canonical frontend URL.
+    is_local_frontend = FRONTEND_BASE_URL.startswith("http://localhost") or FRONTEND_BASE_URL.startswith(
+        "http://127.0.0.1"
+    )
+    if not is_local_frontend:
+        return FRONTEND_BASE_URL
+
     if not request:
         return FRONTEND_BASE_URL
 
