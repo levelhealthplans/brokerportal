@@ -2112,20 +2112,53 @@ def revoke_user_sessions(conn: sqlite3.Connection, user_id: str) -> None:
     cur.execute("DELETE FROM AuthSession WHERE user_id = ?", (user_id,))
 
 
+def parse_resend_error_message(exc: Exception) -> str:
+    default_message = "Failed to send email."
+    if isinstance(exc, urlerror.HTTPError):
+        raw_body = ""
+        try:
+            raw_body = exc.read().decode("utf-8", errors="ignore").strip()
+        except Exception:
+            raw_body = ""
+        if raw_body:
+            try:
+                parsed = json.loads(raw_body)
+                if isinstance(parsed, dict):
+                    for key in ("message", "detail", "error"):
+                        value = parsed.get(key)
+                        if isinstance(value, str) and value.strip():
+                            return value.strip()
+                        if isinstance(value, dict):
+                            nested = value.get("message")
+                            if isinstance(nested, str) and nested.strip():
+                                return nested.strip()
+            except Exception:
+                pass
+            if len(raw_body) <= 300:
+                return raw_body
+        if getattr(exc, "reason", None):
+            return f"{default_message} {str(exc.reason).strip()}"
+    return default_message
+
+
 def send_resend_email(
     *,
     to_email: str,
     subject: str,
     html_body: str,
     text_body: Optional[str] = None,
+    from_email: Optional[str] = None,
     raise_delivery_error: bool = False,
 ) -> bool:
     api_key = os.getenv("RESEND_API_KEY", "").strip()
-    from_email = os.getenv("RESEND_FROM_EMAIL", "").strip()
-    if not api_key or not from_email:
+    sender_email = (
+        (from_email or "").strip()
+        or os.getenv("RESEND_FROM_EMAIL", "").strip()
+    )
+    if not api_key or not sender_email:
         return False
     payload = {
-        "from": from_email,
+        "from": sender_email,
         "to": [to_email],
         "subject": subject,
         "html": html_body,
@@ -2147,19 +2180,24 @@ def send_resend_email(
                 if raise_delivery_error:
                     raise HTTPException(status_code=502, detail="Failed to send email.")
                 return False
+    except urlerror.HTTPError as exc:
+        if raise_delivery_error:
+            raise HTTPException(status_code=502, detail=parse_resend_error_message(exc))
+        return False
     except HTTPException:
         if raise_delivery_error:
             raise
         return False
-    except Exception:
+    except Exception as exc:
         if raise_delivery_error:
-            raise HTTPException(status_code=502, detail="Failed to send email.")
+            raise HTTPException(status_code=502, detail=parse_resend_error_message(exc))
         return False
     return True
 
 
 def send_resend_magic_link(to_email: str, link: str) -> bool:
     safe_link = html.escape(link, quote=True)
+    sender = os.getenv("RESEND_MAGIC_LINK_FROM_EMAIL", "").strip() or None
     return send_resend_email(
         to_email=to_email,
         subject="Your Level Health sign-in link",
@@ -2173,6 +2211,7 @@ def send_resend_magic_link(to_email: str, link: str) -> bool:
             f"{link}\n\n"
             f"This link expires in {MAGIC_LINK_DURATION_MINUTES} minutes."
         ),
+        from_email=sender,
         raise_delivery_error=True,
     )
 
@@ -2199,6 +2238,7 @@ def send_resend_notification_email(
 ) -> bool:
     if not RESEND_NOTIFICATION_EMAILS_ENABLED:
         return False
+    sender = os.getenv("RESEND_NOTIFICATION_FROM_EMAIL", "").strip() or None
     safe_title = html.escape(title.strip() or "Level Health notification")
     safe_body = html.escape(body.strip())
     href = notification_entity_href(entity_type, entity_id)
@@ -2220,6 +2260,7 @@ def send_resend_notification_email(
         subject=f"Level Health notification: {title.strip() or 'Update'}",
         html_body="".join(html_body_parts),
         text_body=text_body,
+        from_email=sender,
         raise_delivery_error=False,
     )
 

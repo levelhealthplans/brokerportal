@@ -1,8 +1,10 @@
 import shutil
 import tempfile
 import unittest
+import io
 from pathlib import Path
 import sys
+from urllib import error as urlerror
 from unittest.mock import patch
 
 from fastapi import HTTPException, Response
@@ -226,6 +228,30 @@ class AdminPasswordAuthTests(unittest.TestCase):
 
         self.assertEqual(result["status"], "dev_link")
         self.assertIn("/auth/verify?token=", result["link"])
+
+    def test_send_resend_magic_link_surfaces_provider_error_message(self) -> None:
+        http_error = urlerror.HTTPError(
+            url="https://api.resend.com/emails",
+            code=403,
+            msg="Forbidden",
+            hdrs=None,
+            fp=io.BytesIO(b'{"message":"The from address is not verified."}'),
+        )
+        with patch.dict(
+            "os.environ",
+            {
+                "RESEND_API_KEY": "test-key",
+                "RESEND_FROM_EMAIL": "no-reply@example.com",
+            },
+            clear=False,
+        ), patch.object(main.urlrequest, "urlopen", side_effect=http_error):
+            with self.assertRaises(HTTPException) as exc:
+                main.send_resend_magic_link(
+                    "recipient@example.com",
+                    "http://localhost:5173/auth/verify?token=abc",
+                )
+        self.assertEqual(exc.exception.status_code, 502)
+        self.assertIn("from address is not verified", str(exc.exception.detail).lower())
 
     def test_create_quote_uses_signed_in_user_identity(self) -> None:
         payload = main.QuoteCreate(

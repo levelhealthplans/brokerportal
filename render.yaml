@@ -22,6 +22,18 @@ services:
         value: "true"
       - key: SESSION_COOKIE_SAMESITE
         value: "lax"
+      - key: ALLOW_DEV_MAGIC_LINK_FALLBACK
+        value: "false"
+      - key: RESEND_NOTIFICATION_EMAILS_ENABLED
+        value: "true"
+      - key: RESEND_API_KEY
+        sync: false
+      - key: RESEND_FROM_EMAIL
+        sync: false
+      - key: RESEND_MAGIC_LINK_FROM_EMAIL
+        sync: false
+      - key: RESEND_NOTIFICATION_FROM_EMAIL
+        sync: false
       - key: PANDADOC_API_KEY
         value: 5ab30f118049d93e7e81513fbd11425817ce0799
     disk:

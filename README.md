@@ -47,6 +47,9 @@ git push
    - `FRONTEND_BASE_URL` to your Vercel URL (example: `https://broker-portal.vercel.app`)
    - `ALLOWED_ORIGINS` to your Vercel URL (example: `https://broker-portal.vercel.app`)
    - `ALLOWED_ORIGIN_REGEX` for preview deploys (example: `https://.*\\.vercel\\.app`)
+   - `RESEND_API_KEY` to your Resend API key
+   - `RESEND_FROM_EMAIL` to a verified sender (example: `no-reply@yourdomain.com`)
+   - optional overrides: `RESEND_MAGIC_LINK_FROM_EMAIL`, `RESEND_NOTIFICATION_FROM_EMAIL`
 5. Deploy.
 6. After deploy, copy the backend URL (example: `https://level-health-backend.onrender.com`).
 
@@ -76,6 +79,12 @@ In Render service env vars, confirm:
 - `UPLOADS_DIR=/var/data/uploads`
 - `SESSION_COOKIE_SECURE=true`
 - `SESSION_COOKIE_SAMESITE=lax`
+- `ALLOW_DEV_MAGIC_LINK_FALLBACK=false`
+- `RESEND_NOTIFICATION_EMAILS_ENABLED=true`
+- `RESEND_API_KEY=...`
+- `RESEND_FROM_EMAIL=no-reply@yourdomain.com` (verified in Resend)
+- `RESEND_MAGIC_LINK_FROM_EMAIL=no-reply@yourdomain.com` (optional override)
+- `RESEND_NOTIFICATION_FROM_EMAIL=no-reply@yourdomain.com` (optional override)
 - `HUBSPOT_IMPLEMENTATION_FORM_URL=https://share.hsforms.com/...`
 - `HUBSPOT_IMPLEMENTATION_FORM_PORTAL_ID=7106327`
 - `HUBSPOT_IMPLEMENTATION_FORM_ID=f215c8d6-451d-4b7b-826f-fdab43b80369`
