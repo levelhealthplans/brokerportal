@@ -23,7 +23,6 @@ export default function Login() {
     last_name: "",
     email: "",
     requested_role: "broker" as "broker" | "sponsor",
-    organization: "",
   });
 
   const onSubmit = async (event: React.FormEvent) => {
@@ -88,7 +87,6 @@ export default function Login() {
         last_name: accessForm.last_name.trim(),
         email: accessForm.email.trim().toLowerCase(),
         requested_role: accessForm.requested_role,
-        organization: accessForm.organization.trim() || undefined,
       });
       setAccessMessage(result.message);
       if (result.status === "approved" || result.status === "existing_user") {
@@ -208,22 +206,14 @@ export default function Login() {
                     <option value="sponsor">Plan Sponsor</option>
                   </select>
                 </label>
-                <label>
-                  Organization / Domain (Optional)
-                  <input
-                    value={accessForm.organization}
-                    onChange={(e) => onAccessFieldChange("organization", e.target.value)}
-                    placeholder="legacybrokerskc.com"
-                  />
-                </label>
                 <div className="inline-actions">
                   <button className="button secondary" type="submit" disabled={accessBusy}>
                     {accessBusy ? "Submitting..." : "Submit Access Request"}
                   </button>
                 </div>
                 <div className="helper">
-                  Broker requests from known broker domains are approved automatically. Sponsor requests go to admin
-                  review.
+                  Your work email domain is used to determine organization routing. Broker requests from known domains
+                  are approved automatically. Sponsor requests go to admin review.
                 </div>
               </form>
             )}

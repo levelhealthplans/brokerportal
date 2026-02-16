@@ -5532,11 +5532,12 @@ def request_access(payload: AccessRequestIn) -> AccessRequestOut:
     requested_role = normalize_access_request_role(payload.requested_role)
     organization_value = (payload.organization or "").strip()
     email_based_domain = email_domain(email)
-    requested_domain = (
-        normalize_domain_candidate(organization_value)
-        if requested_role == "sponsor"
-        else normalize_domain_candidate(email_based_domain)
-    )
+    if requested_role == "sponsor":
+        requested_domain = normalize_domain_candidate(organization_value) or normalize_domain_candidate(
+            email_based_domain
+        )
+    else:
+        requested_domain = normalize_domain_candidate(email_based_domain)
 
     with get_db() as conn:
         existing_user = fetch_user_by_email(conn, email)

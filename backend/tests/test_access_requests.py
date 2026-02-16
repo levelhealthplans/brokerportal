@@ -66,7 +66,6 @@ class AccessRequestTests(unittest.TestCase):
                 last_name="Sponsor",
                 email="sam@sponsorco.com",
                 requested_role="sponsor",
-                organization="sponsorco.com",
             )
         )
         self.assertEqual(result.status, "pending_review")
