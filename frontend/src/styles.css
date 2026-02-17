@@ -1310,6 +1310,32 @@ textarea:focus {
   gap: 16px;
 }
 
+.wizard-progress-strip {
+  display: grid;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  gap: 8px;
+}
+
+.wizard-progress-card {
+  border: 1px solid #d3dbe8;
+  border-radius: 12px;
+  background: linear-gradient(145deg, #f8fbff 0%, #f3fbf6 100%);
+  padding: 10px 12px;
+}
+
+.wizard-progress-label {
+  font-size: 11px;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  color: var(--charcoal);
+  margin-bottom: 6px;
+}
+
+.wizard-progress-card strong {
+  font-size: 20px;
+  color: var(--midnight);
+}
+
 .wizard-sidebar {
   background: linear-gradient(160deg, #ffe8b9 0%, #ffd88a 100%);
   border: 1px solid #f1c567;
@@ -1410,6 +1436,14 @@ textarea:focus {
 
 .wizard-row:hover {
   background: #ffe8eb;
+}
+
+.wizard-issue-row-resolved {
+  background: #eef8f2;
+}
+
+.wizard-issue-row-resolved input {
+  color: #557064;
 }
 
 .wizard-row > div:first-child {
@@ -1707,6 +1741,12 @@ textarea:focus {
   }
   .dashboard-action-meta {
     justify-content: space-between;
+  }
+  .wizard-layout {
+    grid-template-columns: 1fr;
+  }
+  .wizard-progress-strip {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
   }
   .dashboard-timeline-row {
     grid-template-columns: 1fr;

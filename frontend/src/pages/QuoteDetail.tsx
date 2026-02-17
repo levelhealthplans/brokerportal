@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { Link, useLocation, useParams } from "react-router-dom";
 import {
   assignNetwork,
@@ -26,6 +26,13 @@ import { useAutoDismissMessage } from "../hooks/useAutoDismissMessage";
 type AssignmentGroupSummary = NonNullable<
   QuoteDetailType["assignments"][number]["result_json"]["group_summary"]
 >;
+type StandardizationIssue =
+  QuoteDetailType["standardizations"][number]["issues_json"][number];
+type WizardIssue = StandardizationIssue & {
+  id: string;
+  resolved?: boolean;
+  resolved_at?: string;
+};
 
 type CensusValueMappings = {
   gender_map: Record<string, string>;
@@ -77,16 +84,13 @@ export default function QuoteDetail() {
   const [error, setError] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
   const [wizardOpen, setWizardOpen] = useState(false);
-  const [wizardIssues, setWizardIssues] = useState<
-    {
-      row: number;
-      field: string;
-      issue: string;
-      value?: string;
-      mapped_value?: string;
-    }[]
-  >([]);
+  const [wizardIssues, setWizardIssues] = useState<WizardIssue[]>([]);
   const [wizardStatus, setWizardStatus] = useState<string | null>(null);
+  const [showResolvedIssues, setShowResolvedIssues] = useState(false);
+  const [lastRunDelta, setLastRunDelta] = useState<{
+    resolved: number;
+    introduced: number;
+  } | null>(null);
   const [autoOpened, setAutoOpened] = useState(false);
   const [autoSubmit, setAutoSubmit] = useState(false);
   const [sampleData, setSampleData] = useState<Record<string, string[]>>({});
@@ -149,6 +153,7 @@ export default function QuoteDetail() {
   const [bulkFixField, setBulkFixField] = useState<BulkFixField>("gender");
   const [bulkFixSourceValue, setBulkFixSourceValue] = useState("");
   const [bulkFixTargetValue, setBulkFixTargetValue] = useState("");
+  const wizardIssueCounterRef = useRef(0);
   const statusMessageFading = useAutoDismissMessage(
     statusMessage,
     setStatusMessage,
@@ -248,6 +253,72 @@ export default function QuoteDetail() {
         }
       });
       return next;
+    });
+  };
+
+  const nextWizardIssueId = () => {
+    wizardIssueCounterRef.current += 1;
+    return `wiz-${wizardIssueCounterRef.current}`;
+  };
+
+  const hydrateWizardIssues = (issues: StandardizationIssue[]): WizardIssue[] =>
+    (issues || []).map((issue) => ({
+      ...issue,
+      id: nextWizardIssueId(),
+      resolved: false,
+    }));
+
+  const toApiIssues = (issues: WizardIssue[]): StandardizationIssue[] =>
+    issues
+      .filter((issue) => !issue.resolved)
+      .map(({ id, resolved, resolved_at, ...issue }) => issue);
+
+  const issueSignature = (issue: Pick<StandardizationIssue, "row" | "field" | "issue" | "value">) =>
+    [
+      String(issue.row || ""),
+      String(issue.field || "").trim().toLowerCase(),
+      String(issue.issue || "").trim().toLowerCase(),
+      String(issue.value || "").trim().toLowerCase(),
+    ].join("|");
+
+  const isIssueEdited = (issue: WizardIssue) =>
+    String(issue.mapped_value || "").trim() !== "" &&
+    String(issue.mapped_value || "").trim() !== String(issue.value || "").trim();
+
+  const applyWizardIssuesFromServer = (
+    nextRawIssues: StandardizationIssue[],
+    options?: { preserveDelta?: boolean },
+  ) => {
+    const nextIssues = hydrateWizardIssues(nextRawIssues || []);
+    setWizardIssues((prev) => {
+      const previousOpenSignatures = new Set(
+        prev
+          .filter((issue) => !issue.resolved)
+          .map((issue) => issueSignature(issue)),
+      );
+      if (!options?.preserveDelta) {
+        const nextSignatures = new Set(
+          nextIssues.map((issue) => issueSignature(issue)),
+        );
+        const resolvedSinceLastCheck = Array.from(previousOpenSignatures).filter(
+          (signature) => !nextSignatures.has(signature),
+        ).length;
+        const introducedSinceLastCheck = Array.from(nextSignatures).filter(
+          (signature) => !previousOpenSignatures.has(signature),
+        ).length;
+        if (
+          previousOpenSignatures.size > 0 &&
+          (resolvedSinceLastCheck > 0 || introducedSinceLastCheck > 0)
+        ) {
+          setLastRunDelta({
+            resolved: resolvedSinceLastCheck,
+            introduced: introducedSinceLastCheck,
+          });
+        } else {
+          setLastRunDelta(null);
+        }
+      }
+      return nextIssues;
     });
   };
 
@@ -373,7 +444,7 @@ export default function QuoteDetail() {
     setWizardOpen(true);
     standardizeQuote(quoteId)
       .then((result) => {
-        setWizardIssues(result.issues_json);
+        applyWizardIssuesFromServer(result.issues_json);
         setWizardStatus(result.status);
         applyDetectedHeaders(
           result.detected_headers || [],
@@ -451,18 +522,30 @@ export default function QuoteDetail() {
     [rankedContracts, rankedPage],
   );
 
+  const openWizardIssues = useMemo(
+    () => wizardIssues.filter((issue) => !issue.resolved),
+    [wizardIssues],
+  );
+  const resolvedWizardIssues = useMemo(
+    () => wizardIssues.filter((issue) => issue.resolved),
+    [wizardIssues],
+  );
+  const visibleWizardIssues = useMemo(
+    () => (showResolvedIssues ? wizardIssues : openWizardIssues),
+    [showResolvedIssues, wizardIssues, openWizardIssues],
+  );
   const wizardIssuesPagination = useMemo(
-    () => paginateItems(wizardIssues, wizardIssuesPage),
-    [wizardIssues, wizardIssuesPage],
+    () => paginateItems(visibleWizardIssues, wizardIssuesPage),
+    [visibleWizardIssues, wizardIssuesPage],
   );
   const issueRowNumbers = useMemo(
     () =>
       new Set(
-        wizardIssues
+        openWizardIssues
           .map((issue) => Number(issue.row))
           .filter((row) => Number.isFinite(row)),
       ),
-    [wizardIssues],
+    [openWizardIssues],
   );
   const samplePreviewRows = useMemo(
     () =>
@@ -485,7 +568,7 @@ export default function QuoteDetail() {
       string,
       { key: string; label: string; count: number; firstIndex: number }
     >();
-    wizardIssues.forEach((issue, index) => {
+    openWizardIssues.forEach((issue, index) => {
       const labelPrefix = fieldLabelMap[issue.field] || issue.field || "General";
       const label = `${labelPrefix}: ${issue.issue}`;
       const key = `${issue.field || "_"}:${issue.issue}`;
@@ -497,8 +580,12 @@ export default function QuoteDetail() {
       bucketMap.set(key, { key, label, count: 1, firstIndex: index });
     });
     return Array.from(bucketMap.values()).sort((a, b) => b.count - a.count);
-  }, [wizardIssues]);
-  const activeIssue = wizardIssues[activeIssueIndex] || null;
+  }, [openWizardIssues]);
+  const activeIssue = visibleWizardIssues[activeIssueIndex] || null;
+  const wizardCompletionPercent = useMemo(() => {
+    if (wizardIssues.length === 0) return 100;
+    return Math.round((resolvedWizardIssues.length / wizardIssues.length) * 100);
+  }, [wizardIssues.length, resolvedWizardIssues.length]);
   const activeIssueRowContext = useMemo(() => {
     if (!activeIssue) return null;
     return (
@@ -577,14 +664,14 @@ export default function QuoteDetail() {
   }, [wizardIssuesPage, wizardIssuesPagination.currentPage]);
 
   useEffect(() => {
-    if (wizardIssues.length === 0) {
+    if (visibleWizardIssues.length === 0) {
       setActiveIssueIndex(0);
       return;
     }
-    if (activeIssueIndex >= wizardIssues.length) {
-      setActiveIssueIndex(wizardIssues.length - 1);
+    if (activeIssueIndex >= visibleWizardIssues.length) {
+      setActiveIssueIndex(visibleWizardIssues.length - 1);
     }
-  }, [wizardIssues, activeIssueIndex]);
+  }, [visibleWizardIssues, activeIssueIndex]);
 
   useEffect(() => {
     if (
@@ -660,10 +747,14 @@ export default function QuoteDetail() {
     setWizardOpen(true);
     setWizardView("fix_queue");
     setShowIssueRowsOnly(false);
+    setShowResolvedIssues(false);
     setActiveIssueIndex(0);
     setWizardIssuesPage(1);
+    setLastRunDelta(null);
     if (latestStandardization) {
-      setWizardIssues(latestStandardization.issues_json);
+      applyWizardIssuesFromServer(latestStandardization.issues_json, {
+        preserveDelta: true,
+      });
       setWizardStatus(latestStandardization.status);
     } else {
       setWizardIssues([]);
@@ -676,7 +767,7 @@ export default function QuoteDetail() {
       ...buildMappings(mappings),
       header_map: headerMappings,
     });
-    setWizardIssues(result.issues_json);
+    applyWizardIssuesFromServer(result.issues_json);
     setWizardStatus(result.status);
     applyDetectedHeaders(
       result.detected_headers || [],
@@ -704,12 +795,15 @@ export default function QuoteDetail() {
     let affected = 0;
     setWizardIssues((prev) =>
       prev.map((issue) => {
+        if (issue.resolved) return issue;
         if (issue.field !== field) return issue;
         const issueValue = String(issue.value || "");
         if (normalizeMappingValue(issueValue) !== sourceNormalized) return issue;
         affected += 1;
         return {
           ...issue,
+          resolved: false,
+          resolved_at: undefined,
           mapped_value: rawTarget,
         };
       }),
@@ -766,8 +860,8 @@ export default function QuoteDetail() {
     setBusy(true);
     setError(null);
     try {
-      const result = await resolveStandardization(quoteId, wizardIssues);
-      setWizardIssues(result.issues_json);
+      const result = await resolveStandardization(quoteId, toApiIssues(wizardIssues));
+      applyWizardIssuesFromServer(result.issues_json, { preserveDelta: true });
       setWizardStatus(result.status);
       if (autoSubmit) {
         await updateQuote(quoteId, { status: "Quote Submitted" });
@@ -793,12 +887,12 @@ export default function QuoteDetail() {
         return;
       }
 
-      let remainingIssues = wizardIssues;
-      if (wizardIssues.length > 0) {
-        const resolved = await resolveStandardization(quoteId, wizardIssues);
-        setWizardIssues(resolved.issues_json);
+      let remainingIssues = toApiIssues(wizardIssues);
+      if (remainingIssues.length > 0) {
+        const resolved = await resolveStandardization(quoteId, remainingIssues);
+        applyWizardIssuesFromServer(resolved.issues_json, { preserveDelta: true });
         setWizardStatus(resolved.status);
-        remainingIssues = resolved.issues_json;
+        remainingIssues = resolved.issues_json || [];
       }
 
       if (remainingIssues.length > 0) {
@@ -820,14 +914,15 @@ export default function QuoteDetail() {
   };
 
   const jumpToIssueIndex = (index: number) => {
-    if (index < 0 || index >= wizardIssues.length) return;
+    if (index < 0 || index >= openWizardIssues.length) return;
     setWizardView("fix_queue");
+    setShowResolvedIssues(false);
     setActiveIssueIndex(index);
     setWizardIssuesPage(Math.floor(index / TABLE_PAGE_SIZE) + 1);
   };
 
   const updateWizardIssue = (
-    index: number,
+    issueId: string,
     patch: Partial<{
       row: number;
       field: string;
@@ -837,11 +932,33 @@ export default function QuoteDetail() {
     }>,
   ) => {
     setWizardIssues((prev) => {
-      const next = [...prev];
-      if (!next[index]) return prev;
-      next[index] = { ...next[index], ...patch };
-      return next;
+      let changed = false;
+      const next = prev.map((issue) => {
+        if (issue.id !== issueId) return issue;
+        changed = true;
+        return { ...issue, ...patch, resolved: false, resolved_at: undefined };
+      });
+      return changed ? next : prev;
     });
+  };
+
+  const setIssueResolved = (issueId: string, resolved: boolean) => {
+    setWizardIssues((prev) =>
+      prev.map((issue) =>
+        issue.id === issueId
+          ? {
+              ...issue,
+              resolved,
+              resolved_at: resolved ? new Date().toISOString() : undefined,
+            }
+          : issue,
+      ),
+    );
+    setStatusMessage(
+      resolved
+        ? "Issue marked resolved. Run Check to verify it no longer appears."
+        : "Issue reopened.",
+    );
   };
 
   const getIssueGuidance = (field: string, issue: string) => {
@@ -987,6 +1104,8 @@ export default function QuoteDetail() {
       );
       setWizardIssues([]);
       setWizardStatus(null);
+      setShowResolvedIssues(false);
+      setLastRunDelta(null);
       setDetectedHeaders([]);
       setHeaderMappings({});
       setSampleData({});
@@ -2059,6 +2178,36 @@ export default function QuoteDetail() {
                 <li>Fix remaining one-off issues, then submit.</li>
               </ol>
             </div>
+            <div className="wizard-progress-strip" style={{ marginTop: 12 }}>
+              <div className="wizard-progress-card">
+                <div className="wizard-progress-label">Mapped Columns</div>
+                <strong>
+                  {
+                    Object.values(headerMappings).filter((value) => Boolean(value))
+                      .length
+                  }
+                  /{Object.keys(requiredHeaderLabels).length}
+                </strong>
+              </div>
+              <div className="wizard-progress-card">
+                <div className="wizard-progress-label">Open Issues</div>
+                <strong>{openWizardIssues.length}</strong>
+              </div>
+              <div className="wizard-progress-card">
+                <div className="wizard-progress-label">Resolved</div>
+                <strong>{resolvedWizardIssues.length}</strong>
+              </div>
+              <div className="wizard-progress-card">
+                <div className="wizard-progress-label">Progress</div>
+                <strong>{wizardCompletionPercent}%</strong>
+              </div>
+            </div>
+            {lastRunDelta && (
+              <div className="notice notice-success" style={{ marginTop: 10 }}>
+                Last check: resolved {lastRunDelta.resolved} issue(s), found{" "}
+                {lastRunDelta.introduced} issue(s) still open.
+              </div>
+            )}
             <section style={{ marginTop: 12 }}>
               <h3>Step 1: Map Columns</h3>
               <div className="wizard-layout">
@@ -2222,7 +2371,7 @@ export default function QuoteDetail() {
                 <button
                   className="button secondary"
                   onClick={handleWizardResolve}
-                  disabled={busy || wizardIssues.length === 0}
+                  disabled={busy || toApiIssues(wizardIssues).length === 0}
                 >
                   Save Issue Edits
                 </button>
@@ -2313,7 +2462,7 @@ export default function QuoteDetail() {
                     : "Fix issues below, then run check again."}
                 </div>
               )}
-              {wizardStatus === "Complete" && wizardIssues.length === 0 && (
+              {wizardStatus === "Complete" && openWizardIssues.length === 0 && (
                 <div style={{ marginBottom: 8 }}>
                   <span className="badge success">Census Complete</span>
                 </div>
@@ -2335,19 +2484,37 @@ export default function QuoteDetail() {
                   </a>
                 </div>
               )}
-              {wizardIssues.length === 0 && (
+              {openWizardIssues.length === 0 && (
                 <div className="helper">
-                  No issues found. You're all set to continue.
+                  No open issues found. You're all set to continue.
                 </div>
               )}
               {wizardIssues.length > 0 && (
                 <>
                   <div className="notice" style={{ marginBottom: 10 }}>
-                    <strong>Issue Summary</strong>
+                    <div
+                      className="card-row"
+                      style={{ alignItems: "center", marginBottom: 6 }}
+                    >
+                      <strong>Issue Summary</strong>
+                      <div className="inline-actions">
+                        <span className="badge warning">
+                          Open: {openWizardIssues.length}
+                        </span>
+                        <span className="badge success">
+                          Resolved: {resolvedWizardIssues.length}
+                        </span>
+                      </div>
+                    </div>
                     <div className="helper" style={{ marginTop: 4 }}>
                       Click a row to jump to the first matching issue.
                     </div>
                     <div style={{ marginTop: 8 }}>
+                      {issueSummaryRows.length === 0 && (
+                        <div className="helper">
+                          No open issues. You can still review resolved items below.
+                        </div>
+                      )}
                       {issueSummaryRows.map((summary) => (
                         <div
                           key={summary.key}
@@ -2373,7 +2540,20 @@ export default function QuoteDetail() {
                     className="inline-actions"
                     style={{ marginBottom: 10, justifyContent: "space-between" }}
                   >
-                    <div className="helper">View mode</div>
+                    <label
+                      className="helper"
+                      style={{ display: "inline-flex", alignItems: "center", gap: 8 }}
+                    >
+                      <input
+                        type="checkbox"
+                        checked={showResolvedIssues}
+                        onChange={(e) => {
+                          setShowResolvedIssues(e.target.checked);
+                          setActiveIssueIndex(0);
+                        }}
+                      />
+                      Show resolved issues in queue/table
+                    </label>
                     <div className="inline-actions">
                       <button
                         className={`button subtle ${wizardView === "fix_queue" ? "active-chip" : ""}`}
@@ -2399,10 +2579,19 @@ export default function QuoteDetail() {
                       >
                         <div>
                           <strong>
-                            Issue {activeIssueIndex + 1} of {wizardIssues.length}
+                            Issue {activeIssueIndex + 1} of {visibleWizardIssues.length}
                           </strong>
                           <div className="helper">
                             Row {activeIssue.row} · {activeIssue.field}
+                          </div>
+                          <div style={{ marginTop: 6 }}>
+                            {activeIssue.resolved ? (
+                              <span className="badge success">Resolved</span>
+                            ) : isIssueEdited(activeIssue) ? (
+                              <span className="badge primary">Edited</span>
+                            ) : (
+                              <span className="badge warning">Open</span>
+                            )}
                           </div>
                         </div>
                         <div className="inline-actions">
@@ -2421,12 +2610,21 @@ export default function QuoteDetail() {
                             type="button"
                             onClick={() =>
                               jumpToIssueIndex(
-                                Math.min(wizardIssues.length - 1, activeIssueIndex + 1),
+                                Math.min(visibleWizardIssues.length - 1, activeIssueIndex + 1),
                               )
                             }
-                            disabled={activeIssueIndex >= wizardIssues.length - 1}
+                            disabled={activeIssueIndex >= visibleWizardIssues.length - 1}
                           >
                             Next
+                          </button>
+                          <button
+                            className="button secondary"
+                            type="button"
+                            onClick={() => {
+                              setIssueResolved(activeIssue.id, !activeIssue.resolved);
+                            }}
+                          >
+                            {activeIssue.resolved ? "Reopen" : "Mark Resolved"}
                           </button>
                         </div>
                       </div>
@@ -2437,7 +2635,7 @@ export default function QuoteDetail() {
                             type="number"
                             value={activeIssue.row}
                             onChange={(e) =>
-                              updateWizardIssue(activeIssueIndex, {
+                              updateWizardIssue(activeIssue.id, {
                                 row: Number(e.target.value),
                               })
                             }
@@ -2448,7 +2646,7 @@ export default function QuoteDetail() {
                           <input
                             value={activeIssue.field}
                             onChange={(e) =>
-                              updateWizardIssue(activeIssueIndex, {
+                              updateWizardIssue(activeIssue.id, {
                                 field: e.target.value,
                               })
                             }
@@ -2459,7 +2657,7 @@ export default function QuoteDetail() {
                           <input
                             value={activeIssue.value || ""}
                             onChange={(e) =>
-                              updateWizardIssue(activeIssueIndex, {
+                              updateWizardIssue(activeIssue.id, {
                                 value: e.target.value,
                               })
                             }
@@ -2470,7 +2668,7 @@ export default function QuoteDetail() {
                           <input
                             value={activeIssue.mapped_value || ""}
                             onChange={(e) =>
-                              updateWizardIssue(activeIssueIndex, {
+                              updateWizardIssue(activeIssue.id, {
                                 mapped_value: e.target.value,
                               })
                             }
@@ -2512,7 +2710,7 @@ export default function QuoteDetail() {
                           <input
                             value={activeIssue.issue}
                             onChange={(e) =>
-                              updateWizardIssue(activeIssueIndex, {
+                              updateWizardIssue(activeIssue.id, {
                                 issue: e.target.value,
                               })
                             }
@@ -2538,6 +2736,7 @@ export default function QuoteDetail() {
                         <table className="table elegant slim">
                           <thead>
                             <tr>
+                              <th>Status</th>
                               <th>Row</th>
                               <th>Field</th>
                               <th>Value</th>
@@ -2550,13 +2749,36 @@ export default function QuoteDetail() {
                               const issueIndex =
                                 wizardIssuesPagination.startItem + index - 1;
                               return (
-                                <tr key={`${issue.row}-${issue.field}-${issueIndex}`}>
+                                <tr
+                                  key={`${issue.id}-${issue.row}-${issue.field}-${issueIndex}`}
+                                  className={issue.resolved ? "wizard-issue-row-resolved" : ""}
+                                >
+                                  <td>
+                                    {issue.resolved ? (
+                                      <span className="badge success">Resolved</span>
+                                    ) : isIssueEdited(issue) ? (
+                                      <span className="badge primary">Edited</span>
+                                    ) : (
+                                      <span className="badge warning">Open</span>
+                                    )}
+                                    <div style={{ marginTop: 6 }}>
+                                      <button
+                                        className="button ghost"
+                                        type="button"
+                                        onClick={() =>
+                                          setIssueResolved(issue.id, !issue.resolved)
+                                        }
+                                      >
+                                        {issue.resolved ? "Reopen" : "Resolve"}
+                                      </button>
+                                    </div>
+                                  </td>
                                   <td>
                                     <input
                                       type="number"
                                       value={issue.row}
                                       onChange={(e) =>
-                                        updateWizardIssue(issueIndex, {
+                                        updateWizardIssue(issue.id, {
                                           row: Number(e.target.value),
                                         })
                                       }
@@ -2566,7 +2788,7 @@ export default function QuoteDetail() {
                                     <input
                                       value={issue.field}
                                       onChange={(e) =>
-                                        updateWizardIssue(issueIndex, {
+                                        updateWizardIssue(issue.id, {
                                           field: e.target.value,
                                         })
                                       }
@@ -2576,7 +2798,7 @@ export default function QuoteDetail() {
                                     <input
                                       value={issue.value || ""}
                                       onChange={(e) =>
-                                        updateWizardIssue(issueIndex, {
+                                        updateWizardIssue(issue.id, {
                                           value: e.target.value,
                                         })
                                       }
@@ -2586,7 +2808,7 @@ export default function QuoteDetail() {
                                     <input
                                       value={issue.mapped_value || ""}
                                       onChange={(e) =>
-                                        updateWizardIssue(issueIndex, {
+                                        updateWizardIssue(issue.id, {
                                           mapped_value: e.target.value,
                                         })
                                       }
@@ -2596,7 +2818,7 @@ export default function QuoteDetail() {
                                     <input
                                       value={issue.issue}
                                       onChange={(e) =>
-                                        updateWizardIssue(issueIndex, {
+                                        updateWizardIssue(issue.id, {
                                           issue: e.target.value,
                                         })
                                       }
@@ -2610,7 +2832,7 @@ export default function QuoteDetail() {
                       </div>
                       <TablePagination
                         page={wizardIssuesPagination.currentPage}
-                        totalItems={wizardIssues.length}
+                        totalItems={visibleWizardIssues.length}
                         onPageChange={setWizardIssuesPage}
                       />
                     </>
