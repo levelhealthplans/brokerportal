@@ -7302,6 +7302,18 @@ def list_tasks(request: Request, role: Optional[str] = None, email: Optional[str
             scoped_email,
             resource="task",
         )
+        order_clause = "ORDER BY i.created_at DESC, t.title ASC"
+        if scoped_role in {"broker", "sponsor"}:
+            order_clause = """
+            ORDER BY
+                CASE
+                    WHEN t.due_date IS NULL OR trim(t.due_date) = '' THEN 1
+                    ELSE 0
+                END ASC,
+                t.due_date ASC,
+                i.company ASC,
+                t.title ASC
+            """
         cur.execute(
             f"""
             SELECT
@@ -7310,7 +7322,7 @@ def list_tasks(request: Request, role: Optional[str] = None, email: Optional[str
             FROM Task t
             JOIN Installation i ON i.id = t.installation_id
             {where_clause}
-            ORDER BY i.created_at DESC, t.title ASC
+            {order_clause}
             """,
             params,
         )

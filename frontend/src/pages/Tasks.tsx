@@ -97,6 +97,7 @@ function dueDescriptor(value: string | null): string {
 export default function Tasks() {
   const { role, email } = useAccess();
   const isAdmin = role === "admin";
+  const forceDueDateSort = role === "broker" || role === "sponsor";
   const [tasks, setTasks] = useState<Task[]>([]);
   const [users, setUsers] = useState<User[]>([]);
   const [error, setError] = useState<string | null>(null);
@@ -302,6 +303,8 @@ export default function Tasks() {
 
   const visibleTasks = useMemo(() => {
     const today = startOfToday();
+    const effectiveSortBy = forceDueDateSort ? "due_date" : sortBy;
+    const effectiveSortDirection = forceDueDateSort ? "asc" : sortDirection;
 
     const filtered = tasks.filter((task) => {
       const taskCompany = task.installation_company || "";
@@ -338,7 +341,7 @@ export default function Tasks() {
     });
 
     const sorted = [...filtered].sort((a, b) => {
-      if (sortBy === "due_date") {
+      if (effectiveSortBy === "due_date") {
         const left = parseDateOnly(a.due_date);
         const right = parseDateOnly(b.due_date);
         if (left && right) return left.getTime() - right.getTime();
@@ -346,14 +349,14 @@ export default function Tasks() {
         if (!left && right) return 1;
         return a.title.localeCompare(b.title);
       }
-      if (sortBy === "state") return a.state.localeCompare(b.state);
-      if (sortBy === "owner") return a.owner.localeCompare(b.owner);
+      if (effectiveSortBy === "state") return a.state.localeCompare(b.state);
+      if (effectiveSortBy === "owner") return a.owner.localeCompare(b.owner);
       const leftCompany = a.installation_company || "";
       const rightCompany = b.installation_company || "";
       return leftCompany.localeCompare(rightCompany);
     });
 
-    return sortDirection === "asc" ? sorted : sorted.reverse();
+    return effectiveSortDirection === "asc" ? sorted : sorted.reverse();
   }, [
     tasks,
     stateFilters,
@@ -362,6 +365,7 @@ export default function Tasks() {
     dueFilter,
     sortBy,
     sortDirection,
+    forceDueDateSort,
   ]);
 
   const openCount = useMemo(
@@ -462,38 +466,42 @@ export default function Tasks() {
             placeholder="Search group or task"
           />
         </label>
-        <label>
-          Sort By
-          <select
-            value={sortBy}
-            onChange={(event) =>
-              setSortBy(
-                event.target.value as
-                  | "due_date"
-                  | "state"
-                  | "owner"
-                  | "company",
-              )
-            }
-          >
-            <option value="due_date">Due Date</option>
-            <option value="state">State</option>
-            <option value="owner">Owner</option>
-            <option value="company">Group</option>
-          </select>
-        </label>
-        <label>
-          Direction
-          <select
-            value={sortDirection}
-            onChange={(event) =>
-              setSortDirection(event.target.value as "asc" | "desc")
-            }
-          >
-            <option value="asc">Ascending</option>
-            <option value="desc">Descending</option>
-          </select>
-        </label>
+        {!forceDueDateSort && (
+          <>
+            <label>
+              Sort By
+              <select
+                value={sortBy}
+                onChange={(event) =>
+                  setSortBy(
+                    event.target.value as
+                      | "due_date"
+                      | "state"
+                      | "owner"
+                      | "company",
+                  )
+                }
+              >
+                <option value="due_date">Due Date</option>
+                <option value="state">State</option>
+                <option value="owner">Owner</option>
+                <option value="company">Group</option>
+              </select>
+            </label>
+            <label>
+              Direction
+              <select
+                value={sortDirection}
+                onChange={(event) =>
+                  setSortDirection(event.target.value as "asc" | "desc")
+                }
+              >
+                <option value="asc">Ascending</option>
+                <option value="desc">Descending</option>
+              </select>
+            </label>
+          </>
+        )}
         <button
           type="button"
           className="button subtle"

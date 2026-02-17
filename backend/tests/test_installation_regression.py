@@ -659,6 +659,77 @@ class InstallationRegressionTests(unittest.TestCase):
         self.assertTrue(any(item.id == quote.id for item in sponsor_quotes))
         self.assertEqual(detail["installation"]["id"], installation.id)
 
+    def test_list_tasks_orders_broker_and_sponsor_by_due_date(self) -> None:
+        quote_one = self._create_quote()
+        installation_one = self._create_installation(quote_one.id)
+        quote_two = self._create_quote()
+        installation_two = self._create_installation(quote_two.id)
+        sponsor_user_id = self._create_sponsor_user(
+            email="sponsor.viewer@gmail.com",
+            organization="External Sponsor",
+        )
+
+        with main.get_db() as conn:
+            cur = conn.cursor()
+            cur.execute(
+                """
+                UPDATE Task
+                SET due_date = ?, assigned_user_id = ?
+                WHERE installation_id = ? AND title = ?
+                """,
+                ("2026-02-20", sponsor_user_id, installation_one.id, "Program Agreement"),
+            )
+            cur.execute(
+                """
+                UPDATE Task
+                SET due_date = ?, assigned_user_id = ?
+                WHERE installation_id = ? AND title = ?
+                """,
+                (None, sponsor_user_id, installation_one.id, "Stoploss Disclosure"),
+            )
+            cur.execute(
+                """
+                UPDATE Task
+                SET due_date = ?, assigned_user_id = ?
+                WHERE installation_id = ? AND title = ?
+                """,
+                ("2026-02-10", sponsor_user_id, installation_two.id, "Program Agreement"),
+            )
+            cur.execute(
+                """
+                UPDATE Task
+                SET due_date = ?, assigned_user_id = ?
+                WHERE installation_id = ? AND title = ?
+                """,
+                ("2026-02-15", sponsor_user_id, installation_two.id, "Implementation Forms"),
+            )
+            conn.commit()
+
+        with patch.object(
+            main,
+            "resolve_access_scope",
+            return_value=("sponsor", "sponsor.viewer@gmail.com"),
+        ):
+            sponsor_tasks = main.list_tasks(request=object())
+        sponsor_due_dates = [task.due_date for task in sponsor_tasks]
+        self.assertEqual(
+            sponsor_due_dates,
+            ["2026-02-10", "2026-02-15", "2026-02-20", None],
+        )
+
+        with patch.object(
+            main,
+            "resolve_access_scope",
+            return_value=("broker", "jake@legacybrokerskc.com"),
+        ):
+            broker_tasks = main.list_tasks(request=object())
+        broker_due_dates = [task.due_date for task in broker_tasks]
+        broker_non_null_due_dates = [due for due in broker_due_dates if due is not None]
+        self.assertEqual(broker_non_null_due_dates, sorted(broker_non_null_due_dates))
+        if None in broker_due_dates:
+            first_null_index = broker_due_dates.index(None)
+            self.assertTrue(all(due is None for due in broker_due_dates[first_null_index:]))
+
     def test_delete_installation_removes_tasks_and_docs(self) -> None:
         quote = self._create_quote()
         installation = self._create_installation(quote.id)
