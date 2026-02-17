@@ -7423,7 +7423,7 @@ def upload_quote_file(
     with get_db() as conn:
         fetch_quote(conn, quote_id)
     upload = save_upload(quote_id, type, file)
-    sync_quote_to_hubspot_async(quote_id, create_if_missing=False)
+    sync_quote_to_hubspot_async(quote_id, create_if_missing=True)
     return upload
 
 
@@ -7460,7 +7460,7 @@ def delete_quote_upload(quote_id: str, upload_id: str) -> Dict[str, str]:
         cur.execute("DELETE FROM HubSpotTicketAttachmentSync WHERE upload_id = ?", (upload_id,))
         conn.commit()
         recompute_needs_action(conn, quote_id)
-        sync_quote_to_hubspot_async(quote_id, create_if_missing=False)
+        sync_quote_to_hubspot_async(quote_id, create_if_missing=True)
     return {"status": "deleted"}
 
 

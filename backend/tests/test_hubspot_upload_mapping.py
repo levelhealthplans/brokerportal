@@ -5,6 +5,7 @@ import unittest
 import uuid
 from pathlib import Path
 import sys
+from urllib.parse import quote as url_quote
 from unittest.mock import patch
 
 from fastapi import UploadFile
@@ -157,6 +158,33 @@ class HubspotUploadMappingTests(unittest.TestCase):
         self.assertEqual(properties["level_health_sbc_uploaded"], "false")
         self.assertIn("Uploads:", properties["content"])
         self.assertIn("members.csv:", properties["content"])
+
+    def test_quote_hubspot_context_upload_links_use_stored_basename(self) -> None:
+        quote = self._create_quote()
+        now = main.now_iso()
+        stored_basename = "abc123-members census.csv"
+        with main.get_db() as conn:
+            cur = conn.cursor()
+            cur.execute(
+                """
+                INSERT INTO Upload (id, quote_id, type, filename, path, created_at)
+                VALUES (?, ?, ?, ?, ?, ?)
+                """,
+                (
+                    str(uuid.uuid4()),
+                    quote.id,
+                    "census",
+                    "members census.csv",
+                    str(self.test_uploads_dir / quote.id / stored_basename),
+                    now,
+                ),
+            )
+            conn.commit()
+            row = main.fetch_quote(conn, quote.id)
+            context = main.build_quote_hubspot_context(conn, dict(row))
+
+        expected_link = f"{main.FRONTEND_BASE_URL}/uploads/{quote.id}/{url_quote(stored_basename)}"
+        self.assertIn(f"members census.csv: {expected_link}", context["upload_files"])
 
     def test_build_ticket_properties_keeps_non_numeric_stage_ids(self) -> None:
         quote_context = {
@@ -322,12 +350,12 @@ class HubspotUploadMappingTests(unittest.TestCase):
                 type="census",
                 file=UploadFile(filename="members.csv", file=io.BytesIO(b"zip\n63101\n")),
             )
-            sync_mock.assert_called_with(quote.id, create_if_missing=False)
+            sync_mock.assert_called_with(quote.id, create_if_missing=True)
 
             sync_mock.reset_mock()
             result = main.delete_quote_upload(quote.id, upload.id)
             self.assertEqual(result["status"], "deleted")
-            sync_mock.assert_called_with(quote.id, create_if_missing=False)
+            sync_mock.assert_called_with(quote.id, create_if_missing=True)
 
     def test_associate_hubspot_note_to_ticket_prefers_v4_default(self) -> None:
         with patch.object(main, "associate_hubspot_records_default", return_value=None) as assoc_mock, patch.object(
