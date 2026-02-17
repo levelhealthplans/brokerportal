@@ -851,7 +851,7 @@ export default function QuoteDetail() {
       return "Use MM/DD/YYYY or YYYY-MM-DD. Example: 01/26/1968.";
     }
     if (normalizedField === "zip") {
-      return "ZIP must be 5 digits. Example: 63101.";
+      return "ZIP must be 5 digits or ZIP+4 (#####-####). Example: 63101 or 63101-1234.";
     }
     if (normalizedField === "gender") {
       return "Use M or F.";
@@ -867,6 +867,12 @@ export default function QuoteDetail() {
     }
     if (normalizedIssue.includes("missing value")) {
       return "This row is missing data for a required field.";
+    }
+    if (normalizedIssue.includes("mismatch:")) {
+      return "Use the tier counts to reconcile dependents: ES/EF need spouse rows, EC/EF need child rows.";
+    }
+    if (normalizedIssue.includes("no employee rows found")) {
+      return "At least one employee row is required. Set Relationship to E for employee records.";
     }
     return "Review this value and mapping, then run check again.";
   };

@@ -14,7 +14,7 @@ import shutil
 import sqlite3
 import threading
 import uuid
-from datetime import datetime, timedelta
+from datetime import date, datetime, timedelta
 from pathlib import Path
 from typing import Any, Dict, List, Optional
 from urllib import error as urlerror
@@ -2882,6 +2882,19 @@ def normalize_zip(value: str) -> Optional[str]:
     return digits
 
 
+def normalize_member_zip(value: str) -> Optional[str]:
+    text = str(value or "").strip()
+    if not text:
+        return None
+    if re.fullmatch(r"\d{5}", text):
+        return text
+    if re.fullmatch(r"\d{5}-\d{4}", text):
+        return text[:5]
+    if re.fullmatch(r"\d{9}", text):
+        return text[:5]
+    return None
+
+
 def resolve_zip_header(headers: List[str]) -> Optional[str]:
     aliases = ["zip", "zipcode", "zip code", "postal code"]
     header_map = {h.lower().replace(" ", ""): h for h in headers}
@@ -2907,7 +2920,7 @@ def compute_network_assignment(
         if all((str(value).strip() == "" for value in row.values())):
             continue
         raw_zip = str(row.get(zip_header, "")).strip()
-        normalized = normalize_zip(raw_zip)
+        normalized = normalize_member_zip(raw_zip)
         if not normalized:
             invalid_rows.append({"row": idx, "zip": raw_zip, "error": "Invalid ZIP"})
             continue
@@ -7829,13 +7842,18 @@ def run_standardization(
             issue: str,
             value: Optional[str] = None,
             mapped_value: Optional[str] = None,
+            rule: Optional[str] = None,
         ) -> None:
             entry: Dict[str, Any] = {"row": row_num, "field": field, "issue": issue}
             if value is not None:
                 entry["value"] = value
             if mapped_value is not None:
                 entry["mapped_value"] = mapped_value
+            if rule:
+                entry["rule"] = rule
             issues.append(entry)
+            if row_num > 0:
+                issue_row_set.add(row_num)
 
         detected_headers: List[str] = []
         sample_data: Dict[str, List[str]] = {}
@@ -7865,13 +7883,40 @@ def run_standardization(
         allowed_gender = {"M", "F"}
         allowed_relationship = {"E", "S", "C"}
         allowed_tier = {"EE", "ES", "EC", "EF", "W"}
+        today_date = datetime.utcnow().date()
+
+        required_field_messages = {
+            "first_name": "First Name is required",
+            "last_name": "Last Name is required",
+            "dob": "DOB is required",
+            "zip": "Zip is required",
+            "gender": "Gender must be M or F",
+            "relationship": "Relationship must be E, S, or C",
+            "enrollment_tier": "Enrollment Tier must be EE, ES, EC, EF, or W",
+        }
+        required_field_rule_ids = {
+            "first_name": "F1",
+            "last_name": "F2",
+            "dob": "F3",
+            "zip": "F4",
+            "gender": "F5",
+            "relationship": "F6",
+            "enrollment_tier": "F7",
+        }
+
+        def age_on_date(dob_date: date, on_date: date) -> int:
+            return on_date.year - dob_date.year - (
+                (on_date.month, on_date.day) < (dob_date.month, dob_date.day)
+            )
 
         standardized_rows: List[Dict[str, str]] = []
+        validated_rows: List[Dict[str, Any]] = []
         for idx, row in enumerate(rows, start=2):
             # Skip completely empty rows (common in Excel exports)
             if all((str(value).strip() == "" for value in row.values())):
                 continue
             standardized_row: Dict[str, str] = {}
+            row_state: Dict[str, Any] = {"row": idx, "relationship": "", "enrollment_tier": "", "dob_date": None}
             total_rows += 1
             for header in detected_headers:
                 if len(sample_data[header]) >= 3:
@@ -7879,68 +7924,126 @@ def run_standardization(
                 raw_value = (row.get(header) or "").strip()
                 if raw_value:
                     sample_data[header].append(raw_value)
+
             for key, header in header_lookup.items():
                 if not header:
                     continue
-                value = (row.get(header) or "").strip()
-                if value == "":
-                    add_issue(idx, key, "Missing value")
-                    issue_row_set.add(idx)
+                raw_value = str(row.get(header) or "").strip()
+                if raw_value == "":
+                    add_issue(
+                        idx,
+                        key,
+                        required_field_messages[key],
+                        value=raw_value,
+                        rule=required_field_rule_ids[key],
+                    )
                     standardized_row[key] = ""
                     continue
 
+                if key == "first_name" or key == "last_name":
+                    standardized_row[key] = raw_value
+                    continue
+
+                if key == "dob":
+                    parsed, normalized_dob = normalize_census_dob(raw_value)
+                    standardized_row[key] = normalized_dob
+                    if not parsed:
+                        add_issue(
+                            idx,
+                            key,
+                            "DOB is invalid",
+                            value=raw_value,
+                            mapped_value=normalized_dob,
+                            rule="F3",
+                        )
+                        continue
+                    try:
+                        dob_date = datetime.strptime(normalized_dob, "%Y-%m-%d").date()
+                    except Exception:
+                        dob_date = None
+                    if dob_date is None:
+                        add_issue(
+                            idx,
+                            key,
+                            "DOB is invalid",
+                            value=raw_value,
+                            mapped_value=normalized_dob,
+                            rule="F3",
+                        )
+                        continue
+                    row_state["dob_date"] = dob_date
+                    if dob_date > today_date:
+                        add_issue(
+                            idx,
+                            key,
+                            "DOB cannot be in the future",
+                            value=raw_value,
+                            mapped_value=normalized_dob,
+                            rule="F3",
+                        )
+                    continue
+
+                if key == "zip":
+                    normalized_zip = normalize_member_zip(raw_value)
+                    standardized_row[key] = normalized_zip or raw_value
+                    if not normalized_zip:
+                        add_issue(
+                            idx,
+                            key,
+                            "Zip is invalid format",
+                            value=raw_value,
+                            rule="F4",
+                        )
+                    continue
+
                 if key == "gender":
-                    mapped = gender_map.get(value.lower(), value).upper()
+                    mapped = gender_map.get(raw_value.lower(), raw_value).upper()
                     standardized_row[key] = mapped
                     if mapped not in allowed_gender:
                         add_issue(
                             idx,
                             key,
-                            "Invalid gender. Allowed: M or F",
-                            value,
-                            mapped,
+                            "Gender must be M or F",
+                            value=raw_value,
+                            mapped_value=mapped,
+                            rule="F5",
                         )
-                        issue_row_set.add(idx)
-                elif key == "relationship":
-                    mapped = relationship_map.get(value.lower(), value).upper()
+                    continue
+
+                if key == "relationship":
+                    mapped = relationship_map.get(raw_value.lower(), raw_value).upper()
                     standardized_row[key] = mapped
+                    row_state["relationship"] = mapped
                     if mapped not in allowed_relationship:
                         add_issue(
                             idx,
                             key,
-                            "Invalid relationship. Allowed: E, S, or C",
-                            value,
-                            mapped,
+                            "Relationship must be E, S, or C",
+                            value=raw_value,
+                            mapped_value=mapped,
+                            rule="F6",
                         )
-                        issue_row_set.add(idx)
-                elif key == "enrollment_tier":
-                    mapped = tier_map.get(value.lower(), value).upper()
+                    continue
+
+                if key == "enrollment_tier":
+                    mapped = tier_map.get(raw_value.lower(), raw_value).upper()
                     standardized_row[key] = mapped
+                    row_state["enrollment_tier"] = mapped
                     if mapped not in allowed_tier:
                         add_issue(
                             idx,
                             key,
-                            "Invalid enrollment tier. Allowed: EE, ES, EC, EF, or W",
-                            value,
-                            mapped,
+                            "Enrollment Tier must be EE, ES, EC, EF, or W",
+                            value=raw_value,
+                            mapped_value=mapped,
+                            rule="F7",
                         )
-                        issue_row_set.add(idx)
-                elif key == "zip":
-                    digits = "".join(ch for ch in value if ch.isdigit())
-                    standardized_row[key] = digits
-                    if len(digits) != 5:
-                        add_issue(idx, key, "Invalid ZIP code", value)
-                        issue_row_set.add(idx)
-                elif key == "dob":
-                    parsed, normalized_dob = normalize_census_dob(value)
-                    standardized_row[key] = normalized_dob
-                    if not parsed:
-                        add_issue(idx, key, "Invalid date format", value)
-                        issue_row_set.add(idx)
-                else:
-                    standardized_row[key] = value
+                    continue
+
+                standardized_row[key] = raw_value
 
             if standardized_row:
+                validated_rows.append(row_state)
                 standardized_rows.append(standardized_row)
                 if len(sample_rows) < 20:
                     sample_rows.append(
@@ -7949,6 +8052,218 @@ def run_standardization(
                             **{field: standardized_row.get(field, "") for field in required_fields.keys()},
                         }
                     )
+
+        employee_rows = [row for row in validated_rows if row.get("relationship") == "E"]
+        if len(employee_rows) == 0:
+            add_issue(1, "relationship", "No Employee rows found on census", rule="R1")
+
+        for row in validated_rows:
+            relationship = str(row.get("relationship") or "")
+            tier = str(row.get("enrollment_tier") or "")
+            row_num = int(row.get("row") or 0)
+            dob_date = row.get("dob_date")
+            if isinstance(dob_date, datetime):
+                dob_date = dob_date.date()
+            if relationship == "C" and isinstance(dob_date, date):
+                if age_on_date(dob_date, today_date) >= 26:
+                    add_issue(
+                        row_num,
+                        "relationship",
+                        "Dependent age 26+ may not be eligible as a Child - verify",
+                        value=str(dob_date),
+                        rule="R2",
+                    )
+            if relationship == "E" and isinstance(dob_date, date):
+                if age_on_date(dob_date, today_date) < 18:
+                    add_issue(
+                        row_num,
+                        "relationship",
+                        "Employee DOB indicates age under 18 - verify",
+                        value=str(dob_date),
+                        rule="R3",
+                    )
+            if relationship in {"S", "C"} and tier in {"EE", "W"}:
+                add_issue(
+                    row_num,
+                    "enrollment_tier",
+                    "Spouse/Child cannot have a tier of EE or W",
+                    value=tier,
+                    rule="R4",
+                )
+
+        ee_count = sum(
+            1
+            for row in validated_rows
+            if row.get("relationship") == "E" and row.get("enrollment_tier") == "EE"
+        )
+        es_count = sum(
+            1
+            for row in validated_rows
+            if row.get("relationship") == "E" and row.get("enrollment_tier") == "ES"
+        )
+        ec_count = sum(
+            1
+            for row in validated_rows
+            if row.get("relationship") == "E" and row.get("enrollment_tier") == "EC"
+        )
+        ef_count = sum(
+            1
+            for row in validated_rows
+            if row.get("relationship") == "E" and row.get("enrollment_tier") == "EF"
+        )
+        w_count = sum(
+            1
+            for row in validated_rows
+            if row.get("relationship") == "E" and row.get("enrollment_tier") == "W"
+        )
+        s_es_count = sum(
+            1
+            for row in validated_rows
+            if row.get("relationship") == "S" and row.get("enrollment_tier") == "ES"
+        )
+        s_ef_count = sum(
+            1
+            for row in validated_rows
+            if row.get("relationship") == "S" and row.get("enrollment_tier") == "EF"
+        )
+        c_ec_count = sum(
+            1
+            for row in validated_rows
+            if row.get("relationship") == "C" and row.get("enrollment_tier") == "EC"
+        )
+        c_ef_count = sum(
+            1
+            for row in validated_rows
+            if row.get("relationship") == "C" and row.get("enrollment_tier") == "EF"
+        )
+        spouse_ee_or_w_count = sum(
+            1
+            for row in validated_rows
+            if row.get("relationship") == "S" and row.get("enrollment_tier") in {"EE", "W"}
+        )
+        spouse_ec_count = sum(
+            1
+            for row in validated_rows
+            if row.get("relationship") == "S" and row.get("enrollment_tier") == "EC"
+        )
+        child_ee_or_w_count = sum(
+            1
+            for row in validated_rows
+            if row.get("relationship") == "C" and row.get("enrollment_tier") in {"EE", "W"}
+        )
+        child_es_count = sum(
+            1
+            for row in validated_rows
+            if row.get("relationship") == "C" and row.get("enrollment_tier") == "ES"
+        )
+        total_spouse_rows = sum(
+            1 for row in validated_rows if row.get("relationship") == "S"
+        )
+        total_child_rows = sum(
+            1 for row in validated_rows if row.get("relationship") == "C"
+        )
+        dependent_ee_count = sum(
+            1
+            for row in validated_rows
+            if row.get("relationship") in {"S", "C"} and row.get("enrollment_tier") == "EE"
+        )
+        dependent_w_count = sum(
+            1
+            for row in validated_rows
+            if row.get("relationship") in {"S", "C"} and row.get("enrollment_tier") == "W"
+        )
+
+        if w_count > 0 and dependent_w_count > 0:
+            add_issue(
+                1,
+                "enrollment_tier",
+                "Dependents should not appear on census under a Waived employee",
+                rule="R5",
+            )
+        if s_es_count != es_count:
+            add_issue(
+                1,
+                "enrollment_tier",
+                f"Mismatch: {es_count} ES employee(s) but {s_es_count} ES spouse(s) found - expected equal counts",
+                rule="TC1",
+            )
+        if s_ef_count != ef_count:
+            add_issue(
+                1,
+                "enrollment_tier",
+                f"Mismatch: {ef_count} EF employee(s) but {s_ef_count} EF spouse(s) found - expected equal counts",
+                rule="TC2",
+            )
+        if spouse_ee_or_w_count > 0:
+            add_issue(
+                1,
+                "enrollment_tier",
+                "Spouse row found with invalid tier EE or W",
+                rule="TC3",
+            )
+        if spouse_ec_count > 0:
+            add_issue(
+                1,
+                "enrollment_tier",
+                "Spouse row with Tier EC found - EC does not include a spouse",
+                rule="TC4",
+            )
+        if c_ec_count < ec_count:
+            add_issue(
+                1,
+                "enrollment_tier",
+                f"Mismatch: {ec_count} EC employee(s) but only {c_ec_count} EC child row(s) - each EC employee needs at least one child",
+                rule="TC5",
+            )
+        if c_ef_count < ef_count:
+            add_issue(
+                1,
+                "enrollment_tier",
+                f"Mismatch: {ef_count} EF employee(s) but only {c_ef_count} EF child row(s) - each EF employee needs at least one child",
+                rule="TC6",
+            )
+        if child_ee_or_w_count > 0:
+            add_issue(
+                1,
+                "enrollment_tier",
+                "Child row found with invalid tier EE or W",
+                rule="TC7",
+            )
+        if child_es_count > 0:
+            add_issue(
+                1,
+                "enrollment_tier",
+                "Child row with Tier ES found - ES does not include a child",
+                rule="TC8",
+            )
+        if total_spouse_rows != (s_es_count + s_ef_count):
+            add_issue(
+                1,
+                "enrollment_tier",
+                "Spouse row(s) found with a tier that does not correspond to any employee tier (ES or EF)",
+                rule="TC9",
+            )
+        if total_child_rows != (c_ec_count + c_ef_count):
+            add_issue(
+                1,
+                "enrollment_tier",
+                "Child row(s) found with a tier that does not correspond to any employee tier (EC or EF)",
+                rule="TC10",
+            )
+        if dependent_ee_count > 0:
+            add_issue(
+                1,
+                "enrollment_tier",
+                "Dependent rows found carrying EE tier - EE is Employee Only",
+                rule="TC11",
+            )
+        if dependent_w_count > 0:
+            add_issue(
+                1,
+                "enrollment_tier",
+                "Dependent rows found carrying W (Waived) tier",
+                rule="TC12",
+            )
 
         if all(header_lookup.values()):
             quote_dir = UPLOADS_DIR / quote_id

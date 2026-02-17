@@ -67,6 +67,8 @@ export type StandardizationRun = {
     issue: string;
     value?: string;
     mapped_value?: string;
+    rule?: string;
+    severity?: "error" | "warning";
   }[];
   issue_count: number;
   status: string;
