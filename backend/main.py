@@ -3445,6 +3445,7 @@ LEGACY_HUBSPOT_TICKET_PROPERTY_MIGRATIONS: Dict[str, Dict[str, str]] = {
 
 CENSUS_PROPERTY_MAPPING_ALIASES: tuple[str, ...] = (
     "member_level_census",
+    "upload_files",
     "census_latest_hubspot_file_id",
     "member_level_census_url",
     "census_latest_file_url",

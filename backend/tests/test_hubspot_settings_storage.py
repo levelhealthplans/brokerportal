@@ -162,6 +162,7 @@ class HubspotSettingsStorageTests(unittest.TestCase):
                 "census_uploaded": "member_level_census_hs",
                 "census_latest_file_url": "legacy_census_url_hs",
                 "member_level_census_url": "legacy_member_census_url_hs",
+                "upload_files": "legacy_upload_files_hs",
             },
         }
         self.settings_path.parent.mkdir(parents=True, exist_ok=True)
@@ -171,20 +172,22 @@ class HubspotSettingsStorageTests(unittest.TestCase):
 
         self.assertEqual(
             loaded["property_mappings"].get("member_level_census"),
-            "legacy_member_census_url_hs",
+            "legacy_upload_files_hs",
         )
         self.assertNotIn("census_uploaded", loaded["property_mappings"])
         self.assertNotIn("census_latest_file_url", loaded["property_mappings"])
         self.assertNotIn("member_level_census_url", loaded["property_mappings"])
+        self.assertNotIn("upload_files", loaded["property_mappings"])
 
         stored = json.loads(self.settings_path.read_text(encoding="utf-8"))
         self.assertEqual(
             stored["property_mappings"].get("member_level_census"),
-            "legacy_member_census_url_hs",
+            "legacy_upload_files_hs",
         )
         self.assertNotIn("census_uploaded", stored["property_mappings"])
         self.assertNotIn("census_latest_file_url", stored["property_mappings"])
         self.assertNotIn("member_level_census_url", stored["property_mappings"])
+        self.assertNotIn("upload_files", stored["property_mappings"])
 
 
 if __name__ == "__main__":
