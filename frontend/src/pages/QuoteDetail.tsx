@@ -63,6 +63,119 @@ const BULK_FIX_MAPPING_KEY_BY_FIELD: Record<
   enrollment_tier: "tier_map",
 };
 
+type SmartSuggestion = {
+  id: string;
+  field: BulkFixField;
+  sourceValue: string;
+  targetValue: string;
+  count: number;
+  reason: string;
+  alreadyMapped: boolean;
+};
+
+const normalizeSuggestionToken = (value: string) =>
+  value
+    .trim()
+    .toLowerCase()
+    .replace(/&/g, "and")
+    .replace(/[^a-z0-9]/g, "");
+
+const GENDER_TARGET_LOOKUP: Record<string, "M" | "F"> = {
+  m: "M",
+  male: "M",
+  man: "M",
+  boy: "M",
+  f: "F",
+  female: "F",
+  woman: "F",
+  girl: "F",
+};
+
+const RELATIONSHIP_TARGET_LOOKUP: Record<string, "E" | "S" | "C"> = {
+  e: "E",
+  ee: "E",
+  employee: "E",
+  emp: "E",
+  subscriber: "E",
+  self: "E",
+  s: "S",
+  spouse: "S",
+  wife: "S",
+  husband: "S",
+  partner: "S",
+  c: "C",
+  child: "C",
+  children: "C",
+  dependent: "C",
+  dependant: "C",
+  dep: "C",
+  son: "C",
+  daughter: "C",
+};
+
+const TIER_TARGET_LOOKUP: Record<string, "EE" | "ES" | "EC" | "EF" | "W"> = {
+  ee: "EE",
+  employeeonly: "EE",
+  single: "EE",
+  employeespouse: "ES",
+  es: "ES",
+  employeechild: "EC",
+  ec: "EC",
+  employeefamily: "EF",
+  family: "EF",
+  ef: "EF",
+  w: "W",
+  waive: "W",
+  waived: "W",
+  waiver: "W",
+  declined: "W",
+  decline: "W",
+};
+
+const inferTierSuggestionTarget = (rawValue: string): "EE" | "ES" | "EC" | "EF" | "W" | null => {
+  const normalized = normalizeSuggestionToken(rawValue);
+  if (!normalized) return null;
+  if (TIER_TARGET_LOOKUP[normalized]) return TIER_TARGET_LOOKUP[normalized];
+  if (
+    normalized.includes("waiv") ||
+    normalized.includes("declin") ||
+    normalized.includes("optout")
+  ) {
+    return "W";
+  }
+  const hasEmployee = normalized.includes("employee") || normalized.includes("emp");
+  const hasSpouse =
+    normalized.includes("spouse") ||
+    normalized.includes("husband") ||
+    normalized.includes("wife") ||
+    normalized.includes("partner");
+  const hasChild =
+    normalized.includes("child") ||
+    normalized.includes("children") ||
+    normalized.includes("dependent") ||
+    normalized.includes("dependant") ||
+    normalized.includes("dep");
+  if (normalized.includes("family")) return "EF";
+  if (hasSpouse && hasChild) return "EF";
+  if (hasSpouse) return "ES";
+  if (hasChild) return "EC";
+  if (hasEmployee || normalized.includes("single") || normalized.includes("subscriber")) {
+    return "EE";
+  }
+  return null;
+};
+
+const inferSmartSuggestionTarget = (
+  field: BulkFixField,
+  rawValue: string,
+): string | null => {
+  const normalized = normalizeSuggestionToken(rawValue);
+  if (!normalized) return null;
+  if (field === "gender") return GENDER_TARGET_LOOKUP[normalized] || null;
+  if (field === "relationship") return RELATIONSHIP_TARGET_LOOKUP[normalized] || null;
+  return inferTierSuggestionTarget(rawValue);
+};
+
 function formatEffectiveCoverageRate(summary?: AssignmentGroupSummary | null): string {
   if (!summary) return "—";
   if (summary.fallback_used) return "100% (fallback)";
@@ -638,6 +751,71 @@ export default function QuoteDetail() {
     );
     return Array.from(uniqueValues).sort((a, b) => a.localeCompare(b));
   }, [wizardIssues, bulkFixField, valueMappings]);
+  const smartSuggestions = useMemo<SmartSuggestion[]>(() => {
+    const suggestions = new Map<string, SmartSuggestion>();
+    const hasExistingMapping = (
+      field: BulkFixField,
+      sourceValue: string,
+      targetValue: string,
+    ) => {
+      const mapping = valueMappings[BULK_FIX_MAPPING_KEY_BY_FIELD[field]];
+      const normalizedSource = normalizeMappingValue(sourceValue);
+      return Object.entries(mapping).some(([from, to]) => {
+        return (
+          normalizeMappingValue(from) === normalizedSource &&
+          to.trim().toUpperCase() === targetValue
+        );
+      });
+    };
+    openWizardIssues.forEach((issue) => {
+      const field = issue.field;
+      if (
+        field !== "gender" &&
+        field !== "relationship" &&
+        field !== "enrollment_tier"
+      ) {
+        return;
+      }
+      const sourceValue = String(issue.value || "").trim();
+      if (!sourceValue) return;
+      const targetValue = inferSmartSuggestionTarget(field, sourceValue);
+      if (!targetValue) return;
+      if (normalizeMappingValue(sourceValue) === normalizeMappingValue(targetValue)) {
+        return;
+      }
+      const key = `${field}|${normalizeMappingValue(sourceValue)}|${targetValue}`;
+      const existing = suggestions.get(key);
+      if (existing) {
+        existing.count += 1;
+        return;
+      }
+      const reason =
+        field === "gender"
+          ? "Common gender normalization"
+          : field === "relationship"
+            ? "Common relationship normalization"
+            : "Common enrollment tier normalization";
+      suggestions.set(key, {
+        id: key,
+        field,
+        sourceValue,
+        targetValue,
+        count: 1,
+        reason,
+        alreadyMapped: hasExistingMapping(field, sourceValue, targetValue),
+      });
+    });
+    return Array.from(suggestions.values())
+      .filter((suggestion) => suggestion.count >= 2 || !suggestion.alreadyMapped)
+      .sort((a, b) => {
+        if (a.alreadyMapped !== b.alreadyMapped) {
+          return a.alreadyMapped ? 1 : -1;
+        }
+        if (a.count !== b.count) return b.count - a.count;
+        return a.sourceValue.localeCompare(b.sourceValue);
+      })
+      .slice(0, 12);
+  }, [openWizardIssues, valueMappings]);
 
   useEffect(() => {
     if (coveragePage !== coveragePagination.currentPage) {
@@ -844,6 +1022,30 @@ export default function QuoteDetail() {
       bulkFixField,
       bulkFixSourceValue,
       bulkFixTargetValue,
+    );
+    if (!nextMappings || !reRunCheck) return;
+    setBusy(true);
+    try {
+      await runWizardStandardize(nextMappings);
+    } catch (err: any) {
+      setError(err.message);
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  const handleApplySmartSuggestion = async (
+    suggestion: SmartSuggestion,
+    reRunCheck: boolean,
+  ) => {
+    setError(null);
+    setBulkFixField(suggestion.field);
+    setBulkFixSourceValue(suggestion.sourceValue);
+    setBulkFixTargetValue(suggestion.targetValue);
+    const nextMappings = applyBulkMapping(
+      suggestion.field,
+      suggestion.sourceValue,
+      suggestion.targetValue,
     );
     if (!nextMappings || !reRunCheck) return;
     setBusy(true);
@@ -2389,6 +2591,60 @@ export default function QuoteDetail() {
               <h3>Step 2: Bulk Value Fixes</h3>
               <div className="helper" style={{ marginBottom: 8 }}>
                 Correct repeated values in one action and optionally re-run checks.
+              </div>
+              <div className="wizard-smart-panel">
+                <div className="card-row" style={{ alignItems: "center" }}>
+                  <strong>Smart Suggestions</strong>
+                  <span className="helper">
+                    Auto-detected from repeated invalid values on this census.
+                  </span>
+                </div>
+                {smartSuggestions.length === 0 && (
+                  <div className="helper" style={{ marginTop: 8 }}>
+                    No high-confidence suggestions yet. Use manual bulk fix fields below.
+                  </div>
+                )}
+                {smartSuggestions.length > 0 && (
+                  <div className="wizard-smart-list">
+                    {smartSuggestions.map((suggestion) => (
+                      <div key={suggestion.id} className="wizard-smart-item">
+                        <div>
+                          <div>
+                            <strong>{BULK_FIX_FIELDS.find((f) => f.value === suggestion.field)?.label || suggestion.field}</strong>
+                            <span className="helper" style={{ marginLeft: 8 }}>
+                              {suggestion.reason}
+                            </span>
+                          </div>
+                          <div className="helper" style={{ marginTop: 4 }}>
+                            "{suggestion.sourceValue}" to "{suggestion.targetValue}" · appears in{" "}
+                            {suggestion.count} issue(s)
+                          </div>
+                        </div>
+                        <div className="inline-actions">
+                          {suggestion.alreadyMapped && (
+                            <span className="badge success">Mapped</span>
+                          )}
+                          <button
+                            className="button ghost"
+                            type="button"
+                            onClick={() => void handleApplySmartSuggestion(suggestion, false)}
+                            disabled={busy}
+                          >
+                            Apply
+                          </button>
+                          <button
+                            className="button secondary"
+                            type="button"
+                            onClick={() => void handleApplySmartSuggestion(suggestion, true)}
+                            disabled={busy}
+                          >
+                            Apply &amp; Run
+                          </button>
+                        </div>
+                      </div>
+                    ))}
+                  </div>
+                )}
               </div>
               <div className="form-grid">
                 <label>
