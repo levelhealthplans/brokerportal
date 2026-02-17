@@ -99,6 +99,24 @@ class StandardizationDobTests(unittest.TestCase):
         self.assertIn("1968-01-26", body)
         self.assertNotIn("1968-01-26 00:00:00", body)
 
+    def test_standardization_defaults_payload_when_body_is_missing(self) -> None:
+        quote = self._create_quote()
+        census_csv = (
+            "first_name,last_name,dob,zip,gender,relationship,enrollment_tier\n"
+            "Jane,Doe,1988-02-14,63101,F,E,EE\n"
+        )
+        with patch.object(main, "sync_quote_to_hubspot_async", return_value=None):
+            main.upload_quote_file(
+                quote.id,
+                type="census",
+                file=UploadFile(filename="members.csv", file=io.BytesIO(census_csv.encode("utf-8"))),
+            )
+
+        result = main.run_standardization(quote.id, None)
+
+        self.assertEqual(result.issue_count, 0)
+        self.assertEqual(result.status, "Complete")
+
 
 if __name__ == "__main__":
     unittest.main()

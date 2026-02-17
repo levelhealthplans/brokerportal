@@ -7785,6 +7785,7 @@ def backfill_installation_orgs(request: Request) -> InstallationOrgBackfillOut:
 def run_standardization(
     quote_id: str, payload: Optional[StandardizationIn] = None
 ) -> StandardizationOut:
+    payload = payload or StandardizationIn()
     with get_db() as conn:
         fetch_quote(conn, quote_id)
         census = latest_census_upload(conn, quote_id)
