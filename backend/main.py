@@ -165,6 +165,11 @@ try:
 except Exception:
     HUBSPOT_SIGNATURE_MAX_AGE_SECONDS = 300
 HUBSPOT_FILES_FOLDER_ROOT = (os.getenv("HUBSPOT_FILES_FOLDER_ROOT", "/level-health/quote-attachments") or "").strip()
+hubspot_files_access_raw = (os.getenv("HUBSPOT_FILES_ACCESS", "PUBLIC_NOT_INDEXABLE") or "").strip().upper()
+if hubspot_files_access_raw not in {"PUBLIC_INDEXABLE", "PUBLIC_NOT_INDEXABLE", "PRIVATE"}:
+    HUBSPOT_FILES_ACCESS = "PUBLIC_NOT_INDEXABLE"
+else:
+    HUBSPOT_FILES_ACCESS = hubspot_files_access_raw
 HUBSPOT_ATTACHMENTS_CREATE_NOTES = os.getenv(
     "HUBSPOT_ATTACHMENTS_CREATE_NOTES",
     "false",
@@ -4716,7 +4721,7 @@ def upload_file_to_hubspot(
     folder_root = HUBSPOT_FILES_FOLDER_ROOT or "/level-health/quote-attachments"
     folder_root = "/" + folder_root.strip("/")
     folder_path = f"{folder_root}/{quote_id}".replace("//", "/")
-    options = json.dumps({"access": "PRIVATE"})
+    options = json.dumps({"access": HUBSPOT_FILES_ACCESS})
 
     with file_path.open("rb") as fh:
         file_bytes = fh.read()
