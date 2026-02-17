@@ -69,6 +69,8 @@ const HUBSPOT_LOCAL_FIELD_OPTIONS = [
   { key: "census_uploaded", label: "Census Uploaded" },
   { key: "census_latest_filename", label: "Census Latest Filename" },
   { key: "census_latest_uploaded_at", label: "Census Latest Uploaded At" },
+  { key: "census_latest_file_url", label: "Census Latest File URL" },
+  { key: "member_level_census", label: "Member Level Census (Link)" },
   { key: "sbc_uploaded", label: "SBC Uploaded" },
   { key: "current_pricing_uploaded", label: "Current Pricing Uploaded" },
   { key: "renewal_uploaded", label: "Renewal Uploaded" },

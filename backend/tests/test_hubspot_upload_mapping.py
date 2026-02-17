@@ -123,6 +123,8 @@ class HubspotUploadMappingTests(unittest.TestCase):
         self.assertEqual(context["census_latest_filename"], "members.csv")
         self.assertEqual(context["census_latest_uploaded_at"], now)
         self.assertEqual(context["upload_count"], 2)
+        self.assertIn(f"/uploads/{quote.id}/members.csv", context["census_latest_file_url"])
+        self.assertEqual(context["member_level_census"], context["census_latest_file_url"])
         self.assertIn("members.csv:", context["upload_files"])
         self.assertIn("sbc.pdf:", context["upload_files"])
         self.assertIn("/uploads/", context["upload_files"])
@@ -134,6 +136,7 @@ class HubspotUploadMappingTests(unittest.TestCase):
             "status": "Draft",
             "census_uploaded": True,
             "census_latest_filename": "members.csv",
+            "census_latest_file_url": "https://portal.example/uploads/q-123/members.csv",
             "sbc_uploaded": False,
             "upload_files": "members.csv: https://portal.example/uploads/q-123/members.csv",
         }
@@ -146,6 +149,7 @@ class HubspotUploadMappingTests(unittest.TestCase):
             "property_mappings": {
                 "census_uploaded": "level_health_census_uploaded",
                 "census_latest_filename": "level_health_census_filename",
+                "census_latest_file_url": "level_health_member_level_census",
                 "sbc_uploaded": "level_health_sbc_uploaded",
             },
         }
@@ -155,6 +159,10 @@ class HubspotUploadMappingTests(unittest.TestCase):
         self.assertEqual(properties["subject"], "Trademark")
         self.assertEqual(properties["level_health_census_uploaded"], "true")
         self.assertEqual(properties["level_health_census_filename"], "members.csv")
+        self.assertEqual(
+            properties["level_health_member_level_census"],
+            "https://portal.example/uploads/q-123/members.csv",
+        )
         self.assertEqual(properties["level_health_sbc_uploaded"], "false")
         self.assertIn("Uploads:", properties["content"])
         self.assertIn("members.csv:", properties["content"])
@@ -184,6 +192,8 @@ class HubspotUploadMappingTests(unittest.TestCase):
             context = main.build_quote_hubspot_context(conn, dict(row))
 
         expected_link = f"{main.FRONTEND_BASE_URL}/uploads/{quote.id}/{url_quote(stored_basename)}"
+        self.assertEqual(context["census_latest_file_url"], expected_link)
+        self.assertEqual(context["member_level_census"], expected_link)
         self.assertIn(f"members census.csv: {expected_link}", context["upload_files"])
 
     def test_build_ticket_properties_keeps_non_numeric_stage_ids(self) -> None:

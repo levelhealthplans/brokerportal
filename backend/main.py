@@ -4098,17 +4098,30 @@ def build_quote_upload_hubspot_fields(conn: sqlite3.Connection, quote_id: str) -
     fields["census_latest_uploaded_at"] = str(latest_census["created_at"] or "").strip() if latest_census else ""
     fields["upload_count"] = len(rows)
 
+    def build_upload_link(row: Optional[sqlite3.Row]) -> str:
+        if not row:
+            return ""
+        path = str(row["path"] or "").strip()
+        if not path:
+            return ""
+        basename = Path(path).name.strip()
+        if not basename:
+            return ""
+        encoded_name = urlparse.quote(basename)
+        return f"{FRONTEND_BASE_URL}/uploads/{quote_id}/{encoded_name}"
+
+    fields["census_latest_file_url"] = build_upload_link(latest_census)
+    # Alias to keep HubSpot mapping label intuitive for admins.
+    fields["member_level_census"] = fields["census_latest_file_url"]
+
     upload_lines: List[str] = []
     for row in rows:
         filename = str(row["filename"] or "").strip()
-        path = str(row["path"] or "").strip()
-        if not filename or not path:
+        if not filename:
             continue
-        basename = Path(path).name.strip()
-        if not basename:
+        link = build_upload_link(row)
+        if not link:
             continue
-        encoded_name = urlparse.quote(basename)
-        link = f"{FRONTEND_BASE_URL}/uploads/{quote_id}/{encoded_name}"
         upload_lines.append(f"{filename}: {link}")
     fields["upload_files"] = "\n".join(upload_lines)
     return fields
