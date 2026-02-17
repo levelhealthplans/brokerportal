@@ -27,6 +27,35 @@ type AssignmentGroupSummary = NonNullable<
   QuoteDetailType["assignments"][number]["result_json"]["group_summary"]
 >;
 
+type CensusValueMappings = {
+  gender_map: Record<string, string>;
+  relationship_map: Record<string, string>;
+  tier_map: Record<string, string>;
+};
+
+type BulkFixField = "gender" | "relationship" | "enrollment_tier";
+
+const BULK_FIX_FIELDS: Array<{ value: BulkFixField; label: string }> = [
+  { value: "gender", label: "Gender" },
+  { value: "relationship", label: "Relationship" },
+  { value: "enrollment_tier", label: "Enrollment Tier" },
+];
+
+const BULK_FIX_TARGET_OPTIONS: Record<BulkFixField, string[]> = {
+  gender: ["M", "F"],
+  relationship: ["E", "S", "C"],
+  enrollment_tier: ["EE", "ES", "EC", "EF", "W"],
+};
+
+const BULK_FIX_MAPPING_KEY_BY_FIELD: Record<
+  BulkFixField,
+  keyof CensusValueMappings
+> = {
+  gender: "gender_map",
+  relationship: "relationship_map",
+  enrollment_tier: "tier_map",
+};
+
 function formatEffectiveCoverageRate(summary?: AssignmentGroupSummary | null): string {
   if (!summary) return "—";
   if (summary.fallback_used) return "100% (fallback)";
@@ -112,6 +141,14 @@ export default function QuoteDetail() {
   );
   const [activeIssueIndex, setActiveIssueIndex] = useState(0);
   const [showIssueRowsOnly, setShowIssueRowsOnly] = useState(false);
+  const [valueMappings, setValueMappings] = useState<CensusValueMappings>({
+    gender_map: {},
+    relationship_map: {},
+    tier_map: {},
+  });
+  const [bulkFixField, setBulkFixField] = useState<BulkFixField>("gender");
+  const [bulkFixSourceValue, setBulkFixSourceValue] = useState("");
+  const [bulkFixTargetValue, setBulkFixTargetValue] = useState("");
   const statusMessageFading = useAutoDismissMessage(
     statusMessage,
     setStatusMessage,
@@ -485,6 +522,36 @@ export default function QuoteDetail() {
       .join(" · ");
   }, [activeIssueRowContext]);
 
+  const normalizeMappingValue = (value: string) => value.trim().toLowerCase();
+
+  const cleanMappingRecord = (mapping: Record<string, string>) =>
+    Object.fromEntries(
+      Object.entries(mapping)
+        .map(([from, to]) => [from.trim(), to.trim()] as const)
+        .filter(([from, to]) => Boolean(from) && Boolean(to)),
+    );
+
+  const buildMappings = (mappings: CensusValueMappings = valueMappings) => ({
+    gender_map: cleanMappingRecord(mappings.gender_map),
+    relationship_map: cleanMappingRecord(mappings.relationship_map),
+    tier_map: cleanMappingRecord(mappings.tier_map),
+  });
+
+  const bulkFixSourceOptions = useMemo(() => {
+    const uniqueValues = new Set<string>();
+    wizardIssues.forEach((issue) => {
+      if (issue.field !== bulkFixField) return;
+      const raw = String(issue.value || "").trim();
+      if (raw) uniqueValues.add(raw);
+    });
+    Object.keys(valueMappings[BULK_FIX_MAPPING_KEY_BY_FIELD[bulkFixField]]).forEach(
+      (raw) => {
+        if (raw.trim()) uniqueValues.add(raw.trim());
+      },
+    );
+    return Array.from(uniqueValues).sort((a, b) => a.localeCompare(b));
+  }, [wizardIssues, bulkFixField, valueMappings]);
+
   useEffect(() => {
     if (coveragePage !== coveragePagination.currentPage) {
       setCoveragePage(coveragePagination.currentPage);
@@ -518,6 +585,37 @@ export default function QuoteDetail() {
       setActiveIssueIndex(wizardIssues.length - 1);
     }
   }, [wizardIssues, activeIssueIndex]);
+
+  useEffect(() => {
+    if (
+      bulkFixSourceValue &&
+      bulkFixSourceOptions.some((value) => value === bulkFixSourceValue)
+    ) {
+      return;
+    }
+    setBulkFixSourceValue(bulkFixSourceOptions[0] || "");
+  }, [bulkFixSourceOptions, bulkFixSourceValue]);
+
+  useEffect(() => {
+    if (
+      bulkFixTargetValue &&
+      BULK_FIX_TARGET_OPTIONS[bulkFixField].includes(bulkFixTargetValue.toUpperCase())
+    ) {
+      return;
+    }
+    setBulkFixTargetValue(BULK_FIX_TARGET_OPTIONS[bulkFixField][0] || "");
+  }, [bulkFixField, bulkFixTargetValue]);
+
+  useEffect(() => {
+    setValueMappings({
+      gender_map: {},
+      relationship_map: {},
+      tier_map: {},
+    });
+    setBulkFixField("gender");
+    setBulkFixSourceValue("");
+    setBulkFixTargetValue("");
+  }, [quoteId]);
 
   const handleStageChange = async (nextStage: string) => {
     setStageDraft(nextStage);
@@ -573,30 +671,90 @@ export default function QuoteDetail() {
     }
   };
 
-  const buildMappings = () => ({
-    gender_map: {},
-    relationship_map: {},
-    tier_map: {},
-  });
+  const runWizardStandardize = async (mappings: CensusValueMappings) => {
+    const result = await standardizeQuote(quoteId, {
+      ...buildMappings(mappings),
+      header_map: headerMappings,
+    });
+    setWizardIssues(result.issues_json);
+    setWizardStatus(result.status);
+    applyDetectedHeaders(
+      result.detected_headers || [],
+      result.sample_data || {},
+      result.sample_rows || [],
+      result.total_rows || 0,
+      result.issue_rows || 0,
+    );
+    refresh();
+  };
+
+  const applyBulkMapping = (
+    field: BulkFixField,
+    sourceValue: string,
+    targetValue: string,
+  ) => {
+    const rawSource = sourceValue.trim();
+    const rawTarget = targetValue.trim().toUpperCase();
+    if (!rawSource || !rawTarget) {
+      setError("Provide both a source value and corrected value to apply a bulk fix.");
+      return null;
+    }
+    const mappingKey = BULK_FIX_MAPPING_KEY_BY_FIELD[field];
+    const sourceNormalized = normalizeMappingValue(rawSource);
+    let affected = 0;
+    setWizardIssues((prev) =>
+      prev.map((issue) => {
+        if (issue.field !== field) return issue;
+        const issueValue = String(issue.value || "");
+        if (normalizeMappingValue(issueValue) !== sourceNormalized) return issue;
+        affected += 1;
+        return {
+          ...issue,
+          mapped_value: rawTarget,
+        };
+      }),
+    );
+    let nextMappings: CensusValueMappings | null = null;
+    setValueMappings((prev) => {
+      const nextMap = {
+        ...prev[mappingKey],
+        [rawSource]: rawTarget,
+      };
+      nextMappings = {
+        ...prev,
+        [mappingKey]: nextMap,
+      };
+      return nextMappings;
+    });
+    setStatusMessage(
+      `Applied bulk mapping ${field}: "${rawSource}" -> "${rawTarget}" (${affected} issue(s) updated).`,
+    );
+    return nextMappings;
+  };
 
   const handleWizardStandardize = async () => {
     setBusy(true);
     setError(null);
     try {
-      const result = await standardizeQuote(quoteId, {
-        ...buildMappings(),
-        header_map: headerMappings,
-      });
-      setWizardIssues(result.issues_json);
-      setWizardStatus(result.status);
-      applyDetectedHeaders(
-        result.detected_headers || [],
-        result.sample_data || {},
-        result.sample_rows || [],
-        result.total_rows || 0,
-        result.issue_rows || 0,
-      );
-      refresh();
+      await runWizardStandardize(valueMappings);
+    } catch (err: any) {
+      setError(err.message);
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  const handleApplyBulkFix = async (reRunCheck: boolean) => {
+    setError(null);
+    const nextMappings = applyBulkMapping(
+      bulkFixField,
+      bulkFixSourceValue,
+      bulkFixTargetValue,
+    );
+    if (!nextMappings || !reRunCheck) return;
+    setBusy(true);
+    try {
+      await runWizardStandardize(nextMappings);
     } catch (err: any) {
       setError(err.message);
     } finally {
@@ -777,20 +935,7 @@ export default function QuoteDetail() {
       await Promise.all(
         files.map((file) => uploadFile(quoteId, file, "census")),
       );
-      const result = await standardizeQuote(quoteId, {
-        ...buildMappings(),
-        header_map: headerMappings,
-      });
-      setWizardIssues(result.issues_json);
-      setWizardStatus(result.status);
-      applyDetectedHeaders(
-        result.detected_headers || [],
-        result.sample_data || {},
-        result.sample_rows || [],
-        result.total_rows || 0,
-        result.issue_rows || 0,
-      );
-      refresh();
+      await runWizardStandardize(valueMappings);
     } catch (err: any) {
       setError(err.message);
     } finally {
@@ -1898,6 +2043,16 @@ export default function QuoteDetail() {
                 Remove Census
               </button>
             </div>
+            <div className="notice" style={{ marginTop: 12 }}>
+              <strong>Step-by-Step Guide</strong>
+              <ol style={{ margin: "8px 0 0 18px" }}>
+                <li>Upload or replace the census file.</li>
+                <li>Map uploaded columns to required Level Health fields.</li>
+                <li>Use Bulk Value Fixes for recurring values (example: female to F).</li>
+                <li>Run Check to validate and refresh issue counts.</li>
+                <li>Fix remaining one-off issues, then submit.</li>
+              </ol>
+            </div>
             <section style={{ marginTop: 12 }}>
               <h3>Step 1: Map Columns</h3>
               <div className="wizard-layout">
@@ -2076,7 +2231,75 @@ export default function QuoteDetail() {
             </section>
 
             <section style={{ marginTop: 16 }}>
-              <h3>Step 2: Needs Action</h3>
+              <h3>Step 2: Bulk Value Fixes</h3>
+              <div className="helper" style={{ marginBottom: 8 }}>
+                Correct repeated values in one action and optionally re-run checks.
+              </div>
+              <div className="form-grid">
+                <label>
+                  Field
+                  <select
+                    value={bulkFixField}
+                    onChange={(e) => setBulkFixField(e.target.value as BulkFixField)}
+                  >
+                    {BULK_FIX_FIELDS.map((fieldOption) => (
+                      <option key={fieldOption.value} value={fieldOption.value}>
+                        {fieldOption.label}
+                      </option>
+                    ))}
+                  </select>
+                </label>
+                <label>
+                  Current Value (from census)
+                  <input
+                    list={`bulk-source-values-${bulkFixField}`}
+                    value={bulkFixSourceValue}
+                    onChange={(e) => setBulkFixSourceValue(e.target.value)}
+                    placeholder="ex: female"
+                  />
+                  <datalist id={`bulk-source-values-${bulkFixField}`}>
+                    {bulkFixSourceOptions.map((value) => (
+                      <option key={`bulk-source-${bulkFixField}-${value}`} value={value} />
+                    ))}
+                  </datalist>
+                </label>
+                <label>
+                  Correct To
+                  <input
+                    list={`bulk-target-values-${bulkFixField}`}
+                    value={bulkFixTargetValue}
+                    onChange={(e) => setBulkFixTargetValue(e.target.value.toUpperCase())}
+                    placeholder="ex: F"
+                  />
+                  <datalist id={`bulk-target-values-${bulkFixField}`}>
+                    {BULK_FIX_TARGET_OPTIONS[bulkFixField].map((value) => (
+                      <option key={`bulk-target-${bulkFixField}-${value}`} value={value} />
+                    ))}
+                  </datalist>
+                </label>
+              </div>
+              <div className="inline-actions" style={{ marginTop: 10 }}>
+                <button
+                  className="button ghost"
+                  type="button"
+                  onClick={() => void handleApplyBulkFix(false)}
+                  disabled={busy}
+                >
+                  Apply Bulk Fix
+                </button>
+                <button
+                  className="button secondary"
+                  type="button"
+                  onClick={() => void handleApplyBulkFix(true)}
+                  disabled={busy}
+                >
+                  Apply &amp; Run Check
+                </button>
+              </div>
+            </section>
+
+            <section style={{ marginTop: 16 }}>
+              <h3>Step 3: Needs Action</h3>
               {wizardStatus && (
                 <div className="helper" style={{ marginBottom: 8 }}>
                   {wizardStatus === "Complete"
@@ -2246,6 +2469,37 @@ export default function QuoteDetail() {
                               })
                             }
                           />
+                          {(
+                            activeIssue.field === "gender" ||
+                            activeIssue.field === "relationship" ||
+                            activeIssue.field === "enrollment_tier"
+                          ) && (
+                            <>
+                              <span className="helper">
+                                Tip: Apply this correction to all matching values below.
+                              </span>
+                              <button
+                                className="button ghost"
+                                type="button"
+                                style={{ marginTop: 6 }}
+                                onClick={() => {
+                                  setBulkFixField(activeIssue.field as BulkFixField);
+                                  setBulkFixSourceValue(String(activeIssue.value || ""));
+                                  setBulkFixTargetValue(
+                                    String(activeIssue.mapped_value || ""),
+                                  );
+                                  void handleApplyBulkFix(false);
+                                }}
+                                disabled={
+                                  busy ||
+                                  !String(activeIssue.value || "").trim() ||
+                                  !String(activeIssue.mapped_value || "").trim()
+                                }
+                              >
+                                Apply To All Matching Values
+                              </button>
+                            </>
+                          )}
                         </label>
                         <label>
                           Issue
