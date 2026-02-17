@@ -125,6 +125,16 @@ HUBSPOT_UPLOAD_FIELD_TYPES = [
     ("other_claims_data", "other_claims_data"),
     ("other_files", "other_files"),
 ]
+HUBSPOT_UPLOAD_FILE_ID_FIELDS = [
+    ("census", "member_level_census"),
+    ("sbc", "sbc_file"),
+    ("current_pricing", "current_pricing_file"),
+    ("renewal", "renewal_file"),
+    ("high_cost_claimant_report", "high_cost_claimant_report_file"),
+    ("aggregate_report", "aggregate_report_file"),
+    ("other_claims_data", "other_claims_data_file"),
+    ("other_files", "other_files_file"),
+]
 HUBSPOT_SYNC_DETAIL_FIELDS = (
     "primary_network",
     "secondary_network",
@@ -4129,6 +4139,26 @@ def build_quote_upload_hubspot_fields(
             continue
         rows_by_type.setdefault(upload_type, []).append(row)
 
+    ticket_key = str(ticket_id or "").strip()
+    synced_file_id_by_upload_id: Dict[str, str] = {}
+    if ticket_key:
+        upload_ids = [str(row["id"] or "").strip() for row in rows if str(row["id"] or "").strip()]
+        if upload_ids:
+            placeholders = ",".join(["?"] * len(upload_ids))
+            cur.execute(
+                f"""
+                SELECT upload_id, hubspot_file_id
+                FROM HubSpotTicketAttachmentSync
+                WHERE ticket_id = ? AND upload_id IN ({placeholders})
+                """,
+                (ticket_key, *upload_ids),
+            )
+            for row in cur.fetchall():
+                upload_id_value = str(row["upload_id"] or "").strip()
+                file_id_value = str(row["hubspot_file_id"] or "").strip()
+                if upload_id_value and upload_id_value not in synced_file_id_by_upload_id:
+                    synced_file_id_by_upload_id[upload_id_value] = file_id_value
+
     fields: Dict[str, Any] = {}
     for upload_type, prefix in HUBSPOT_UPLOAD_FIELD_TYPES:
         matches = rows_by_type.get(upload_type, [])
@@ -4154,25 +4184,13 @@ def build_quote_upload_hubspot_fields(
 
     fields["census_latest_file_url"] = build_upload_link(latest_census)
 
-    census_hubspot_file_id = ""
-    latest_census_id = str((latest_census["id"] if latest_census else "") or "").strip()
-    ticket_key = str(ticket_id or "").strip()
-    if latest_census_id and ticket_key:
-        cur.execute(
-            """
-            SELECT hubspot_file_id
-            FROM HubSpotTicketAttachmentSync
-            WHERE upload_id = ? AND ticket_id = ?
-            ORDER BY updated_at DESC
-            LIMIT 1
-            """,
-            (latest_census_id, ticket_key),
-        )
-        sync_row = cur.fetchone()
-        census_hubspot_file_id = str((sync_row["hubspot_file_id"] if sync_row else "") or "").strip()
-    fields["census_latest_hubspot_file_id"] = census_hubspot_file_id
-    # Keep this key as the primary "Member Level Census" mapping target for HubSpot file fields.
-    fields["member_level_census"] = census_hubspot_file_id
+    for upload_type, local_field in HUBSPOT_UPLOAD_FILE_ID_FIELDS:
+        latest_upload = rows_by_type.get(upload_type, [None])[0]
+        latest_upload_id = str((latest_upload["id"] if latest_upload else "") or "").strip()
+        fields[local_field] = synced_file_id_by_upload_id.get(latest_upload_id, "") if latest_upload_id else ""
+
+    # Backward-compatible alias kept for legacy mappings.
+    fields["census_latest_hubspot_file_id"] = fields.get("member_level_census", "")
     # Optional text-link alias for customers mapping to a non-file/string property.
     fields["member_level_census_url"] = fields["census_latest_file_url"]
 
