@@ -3443,6 +3443,16 @@ LEGACY_HUBSPOT_TICKET_PROPERTY_MIGRATIONS: Dict[str, Dict[str, str]] = {
     },
 }
 
+CENSUS_PROPERTY_MAPPING_ALIASES: tuple[str, ...] = (
+    "member_level_census",
+    "census_latest_hubspot_file_id",
+    "member_level_census_url",
+    "census_latest_file_url",
+    "census_latest_filename",
+    "census_latest_uploaded_at",
+    "census_uploaded",
+)
+
 
 def migrate_legacy_ticket_property_mappings(value: Optional[Dict[str, Any]]) -> Dict[str, str]:
     mapping = normalize_ticket_property_mappings(value)
@@ -3450,6 +3460,18 @@ def migrate_legacy_ticket_property_mappings(value: Optional[Dict[str, Any]]) -> 
     for local_key, hubspot_property in mapping.items():
         replacement = LEGACY_HUBSPOT_TICKET_PROPERTY_MIGRATIONS.get(local_key, {}).get(hubspot_property)
         migrated[local_key] = replacement or hubspot_property
+
+    canonical_census_property = ""
+    for key in CENSUS_PROPERTY_MAPPING_ALIASES:
+        candidate = str(migrated.get(key) or "").strip()
+        if candidate:
+            canonical_census_property = candidate
+            break
+    if canonical_census_property:
+        migrated["member_level_census"] = canonical_census_property
+    for key in CENSUS_PROPERTY_MAPPING_ALIASES:
+        if key != "member_level_census":
+            migrated.pop(key, None)
     return migrated
 
 

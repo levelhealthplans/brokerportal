@@ -151,6 +151,41 @@ class HubspotSettingsStorageTests(unittest.TestCase):
         self.assertEqual(stored["property_mappings"]["secondary_network"], "secondary_network")
         self.assertEqual(stored["property_mappings"]["renewal_comparison"], "renewal_comparison")
 
+    def test_read_hubspot_settings_unifies_census_mapping_keys(self) -> None:
+        legacy_payload = {
+            "enabled": True,
+            "portal_id": "7106327",
+            "pipeline_id": "98238573",
+            "sync_quote_to_hubspot": True,
+            "sync_hubspot_to_quote": True,
+            "property_mappings": {
+                "census_uploaded": "member_level_census_hs",
+                "census_latest_file_url": "legacy_census_url_hs",
+                "member_level_census_url": "legacy_member_census_url_hs",
+            },
+        }
+        self.settings_path.parent.mkdir(parents=True, exist_ok=True)
+        self.settings_path.write_text(json.dumps(legacy_payload), encoding="utf-8")
+
+        loaded = main.read_hubspot_settings(include_token=True)
+
+        self.assertEqual(
+            loaded["property_mappings"].get("member_level_census"),
+            "legacy_member_census_url_hs",
+        )
+        self.assertNotIn("census_uploaded", loaded["property_mappings"])
+        self.assertNotIn("census_latest_file_url", loaded["property_mappings"])
+        self.assertNotIn("member_level_census_url", loaded["property_mappings"])
+
+        stored = json.loads(self.settings_path.read_text(encoding="utf-8"))
+        self.assertEqual(
+            stored["property_mappings"].get("member_level_census"),
+            "legacy_member_census_url_hs",
+        )
+        self.assertNotIn("census_uploaded", stored["property_mappings"])
+        self.assertNotIn("census_latest_file_url", stored["property_mappings"])
+        self.assertNotIn("member_level_census_url", stored["property_mappings"])
+
 
 if __name__ == "__main__":
     unittest.main()
