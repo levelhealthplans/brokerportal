@@ -226,6 +226,7 @@ HUBSPOT_OAUTH_DEFAULT_SCOPES = (
     "crm.schemas.companies.read crm.schemas.companies.write "
     "crm.schemas.contacts.read crm.schemas.contacts.write "
 )
+HUBSPOT_OAUTH_REQUIRED_SCOPES = ("oauth", "tickets", "files")
 HUBSPOT_SYNC_LOCK_GUARD = threading.Lock()
 HUBSPOT_SYNC_LOCKS: Dict[str, threading.Lock] = {}
 
@@ -335,6 +336,19 @@ def parse_url_list(value: str) -> List[str]:
         if candidate not in cleaned:
             cleaned.append(candidate)
     return cleaned
+
+
+def normalize_hubspot_oauth_scopes(value: str) -> str:
+    parts = re.split(r"[\s,]+", str(value or "").strip())
+    scopes: List[str] = []
+    for part in parts:
+        candidate = str(part or "").strip()
+        if candidate and candidate not in scopes:
+            scopes.append(candidate)
+    for required in HUBSPOT_OAUTH_REQUIRED_SCOPES:
+        if required not in scopes:
+            scopes.append(required)
+    return " ".join(scopes)
 
 
 def resolve_frontend_base_url(request: Optional[Request] = None) -> str:
@@ -6168,9 +6182,10 @@ def start_hubspot_oauth(payload: HubSpotOAuthStartIn, request: Request) -> HubSp
     if not redirect_uri.startswith("https://") and not redirect_uri.startswith("http://"):
         raise HTTPException(status_code=400, detail="Invalid redirect_uri")
 
-    scopes = (os.getenv("HUBSPOT_OAUTH_SCOPES", HUBSPOT_OAUTH_DEFAULT_SCOPES) or "").strip()
-    if not scopes:
-        scopes = HUBSPOT_OAUTH_DEFAULT_SCOPES
+    scopes_raw = (os.getenv("HUBSPOT_OAUTH_SCOPES", HUBSPOT_OAUTH_DEFAULT_SCOPES) or "").strip()
+    if not scopes_raw:
+        scopes_raw = HUBSPOT_OAUTH_DEFAULT_SCOPES
+    scopes = normalize_hubspot_oauth_scopes(scopes_raw)
 
     state_token = secrets.token_urlsafe(32)
     created_at = now_iso()
