@@ -124,7 +124,9 @@ class HubspotUploadMappingTests(unittest.TestCase):
         self.assertEqual(context["census_latest_uploaded_at"], now)
         self.assertEqual(context["upload_count"], 2)
         self.assertIn(f"/uploads/{quote.id}/members.csv", context["census_latest_file_url"])
-        self.assertEqual(context["member_level_census"], context["census_latest_file_url"])
+        self.assertEqual(context["census_latest_hubspot_file_id"], "")
+        self.assertEqual(context["member_level_census"], "")
+        self.assertEqual(context["member_level_census_url"], context["census_latest_file_url"])
         self.assertIn("members.csv:", context["upload_files"])
         self.assertIn("sbc.pdf:", context["upload_files"])
         self.assertIn("/uploads/", context["upload_files"])
@@ -193,8 +195,62 @@ class HubspotUploadMappingTests(unittest.TestCase):
 
         expected_link = f"{main.FRONTEND_BASE_URL}/uploads/{quote.id}/{url_quote(stored_basename)}"
         self.assertEqual(context["census_latest_file_url"], expected_link)
-        self.assertEqual(context["member_level_census"], expected_link)
+        self.assertEqual(context["census_latest_hubspot_file_id"], "")
+        self.assertEqual(context["member_level_census"], "")
+        self.assertEqual(context["member_level_census_url"], expected_link)
         self.assertIn(f"members census.csv: {expected_link}", context["upload_files"])
+
+    def test_quote_hubspot_context_uses_synced_hubspot_file_id_for_member_level_census(self) -> None:
+        quote = self._create_quote()
+        now = main.now_iso()
+        upload_id = str(uuid.uuid4())
+        with main.get_db() as conn:
+            cur = conn.cursor()
+            cur.execute(
+                """
+                INSERT INTO Upload (id, quote_id, type, filename, path, created_at)
+                VALUES (?, ?, ?, ?, ?, ?)
+                """,
+                (
+                    upload_id,
+                    quote.id,
+                    "census",
+                    "members.csv",
+                    str(self.test_uploads_dir / quote.id / "members.csv"),
+                    now,
+                ),
+            )
+            cur.execute(
+                """
+                UPDATE Quote
+                SET hubspot_ticket_id = ?
+                WHERE id = ?
+                """,
+                ("ticket-1", quote.id),
+            )
+            cur.execute(
+                """
+                INSERT INTO HubSpotTicketAttachmentSync (
+                    id, upload_id, quote_id, ticket_id, hubspot_file_id, hubspot_note_id, created_at, updated_at
+                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+                """,
+                (
+                    str(uuid.uuid4()),
+                    upload_id,
+                    quote.id,
+                    "ticket-1",
+                    "hubspot-file-1",
+                    "hubspot-note-1",
+                    now,
+                    now,
+                ),
+            )
+            conn.commit()
+            row = main.fetch_quote(conn, quote.id)
+            context = main.build_quote_hubspot_context(conn, dict(row))
+
+        self.assertEqual(context["census_latest_hubspot_file_id"], "hubspot-file-1")
+        self.assertEqual(context["member_level_census"], "hubspot-file-1")
 
     def test_build_ticket_properties_keeps_non_numeric_stage_ids(self) -> None:
         quote_context = {

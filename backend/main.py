@@ -4068,11 +4068,16 @@ def to_hubspot_property_value(value: Any) -> str:
     return str(value)
 
 
-def build_quote_upload_hubspot_fields(conn: sqlite3.Connection, quote_id: str) -> Dict[str, Any]:
+def build_quote_upload_hubspot_fields(
+    conn: sqlite3.Connection,
+    quote_id: str,
+    *,
+    ticket_id: Optional[str] = None,
+) -> Dict[str, Any]:
     cur = conn.cursor()
     cur.execute(
         """
-        SELECT type, filename, path, created_at
+        SELECT id, type, filename, path, created_at
         FROM Upload
         WHERE quote_id = ?
         ORDER BY created_at DESC
@@ -4111,8 +4116,28 @@ def build_quote_upload_hubspot_fields(conn: sqlite3.Connection, quote_id: str) -
         return f"{FRONTEND_BASE_URL}/uploads/{quote_id}/{encoded_name}"
 
     fields["census_latest_file_url"] = build_upload_link(latest_census)
-    # Alias to keep HubSpot mapping label intuitive for admins.
-    fields["member_level_census"] = fields["census_latest_file_url"]
+
+    census_hubspot_file_id = ""
+    latest_census_id = str((latest_census["id"] if latest_census else "") or "").strip()
+    ticket_key = str(ticket_id or "").strip()
+    if latest_census_id and ticket_key:
+        cur.execute(
+            """
+            SELECT hubspot_file_id
+            FROM HubSpotTicketAttachmentSync
+            WHERE upload_id = ? AND ticket_id = ?
+            ORDER BY updated_at DESC
+            LIMIT 1
+            """,
+            (latest_census_id, ticket_key),
+        )
+        sync_row = cur.fetchone()
+        census_hubspot_file_id = str((sync_row["hubspot_file_id"] if sync_row else "") or "").strip()
+    fields["census_latest_hubspot_file_id"] = census_hubspot_file_id
+    # Keep this key as the primary "Member Level Census" mapping target for HubSpot file fields.
+    fields["member_level_census"] = census_hubspot_file_id
+    # Optional text-link alias for customers mapping to a non-file/string property.
+    fields["member_level_census_url"] = fields["census_latest_file_url"]
 
     upload_lines: List[str] = []
     for row in rows:
@@ -4132,7 +4157,8 @@ def build_quote_hubspot_context(conn: sqlite3.Connection, quote: Dict[str, Any])
     quote_id = str(context.get("id") or "").strip()
     if not quote_id:
         return context
-    context.update(build_quote_upload_hubspot_fields(conn, quote_id))
+    ticket_id = str(context.get("hubspot_ticket_id") or "").strip()
+    context.update(build_quote_upload_hubspot_fields(conn, quote_id, ticket_id=ticket_id or None))
     return context
 
 
@@ -5166,6 +5192,12 @@ def sync_quote_to_hubspot(conn: sqlite3.Connection, quote_id: str, *, create_if_
     if not ticket_id and not create_if_missing:
         return
 
+    def build_ticket_properties_for_ticket(current_ticket_id: str) -> Dict[str, str]:
+        refreshed_quote = dict(fetch_quote(conn, quote_id))
+        refreshed_quote["hubspot_ticket_id"] = current_ticket_id
+        refreshed_context = build_quote_hubspot_context(conn, refreshed_quote)
+        return build_hubspot_ticket_properties(refreshed_context, settings)
+
     try:
         if ticket_id:
             _, property_warning = upsert_hubspot_ticket_with_recovery(
@@ -5180,13 +5212,30 @@ def sync_quote_to_hubspot(conn: sqlite3.Connection, quote_id: str, *, create_if_
                 quote_id=quote_id,
                 ticket_id=ticket_id,
             )
+            post_attachment_property_warning = None
+            try:
+                post_attachment_properties = build_ticket_properties_for_ticket(ticket_id)
+                _, post_attachment_property_warning = upsert_hubspot_ticket_with_recovery(
+                    token,
+                    ticket_id=ticket_id,
+                    properties=post_attachment_properties,
+                )
+            except Exception as exc:
+                post_attachment_property_warning = (
+                    f"Post-attachment property sync failed: {hubspot_exception_message(exc)}"
+                )
             ticket_url = build_hubspot_ticket_url(settings["portal_id"], ticket_id)
             update_quote_hubspot_sync_state(
                 conn,
                 quote_id,
                 ticket_id=ticket_id,
                 ticket_url=ticket_url,
-                sync_error=combine_warnings(property_warning, association_warning, attachment_warning),
+                sync_error=combine_warnings(
+                    property_warning,
+                    association_warning,
+                    attachment_warning,
+                    post_attachment_property_warning,
+                ),
             )
             return
 
@@ -5206,6 +5255,7 @@ def sync_quote_to_hubspot(conn: sqlite3.Connection, quote_id: str, *, create_if_
         new_ticket_id = str(created.get("id") or "").strip()
         association_warning = None
         attachment_warning = None
+        post_attachment_property_warning = None
         if new_ticket_id:
             association_warning = sync_hubspot_ticket_associations(conn, token, quote, new_ticket_id)
             attachment_warning = sync_hubspot_ticket_file_attachments(
@@ -5214,13 +5264,29 @@ def sync_quote_to_hubspot(conn: sqlite3.Connection, quote_id: str, *, create_if_
                 quote_id=quote_id,
                 ticket_id=new_ticket_id,
             )
+            try:
+                post_attachment_properties = build_ticket_properties_for_ticket(new_ticket_id)
+                _, post_attachment_property_warning = upsert_hubspot_ticket_with_recovery(
+                    token,
+                    ticket_id=new_ticket_id,
+                    properties=post_attachment_properties,
+                )
+            except Exception as exc:
+                post_attachment_property_warning = (
+                    f"Post-attachment property sync failed: {hubspot_exception_message(exc)}"
+                )
         ticket_url = build_hubspot_ticket_url(settings["portal_id"], new_ticket_id)
         update_quote_hubspot_sync_state(
             conn,
             quote_id,
             ticket_id=new_ticket_id or None,
             ticket_url=ticket_url,
-            sync_error=combine_warnings(property_warning, association_warning, attachment_warning),
+            sync_error=combine_warnings(
+                property_warning,
+                association_warning,
+                attachment_warning,
+                post_attachment_property_warning,
+            ),
         )
     except Exception as exc:
         detail = str(exc)
