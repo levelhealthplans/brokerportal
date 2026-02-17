@@ -438,9 +438,9 @@ class HubspotUploadMappingTests(unittest.TestCase):
         self.assertIsNone(warning_one)
         self.assertIsNone(warning_two)
         self.assertEqual(upload_mock.call_count, 1)
-        self.assertEqual(note_mock.call_count, 1)
+        self.assertEqual(note_mock.call_count, 0)
         self.assertEqual(row["hubspot_file_id"], "file-1")
-        self.assertEqual(row["hubspot_note_id"], "note-1")
+        self.assertEqual(row["hubspot_note_id"], "")
 
     def test_upload_and_delete_trigger_hubspot_resync(self) -> None:
         quote = self._create_quote()

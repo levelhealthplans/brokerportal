@@ -165,6 +165,10 @@ try:
 except Exception:
     HUBSPOT_SIGNATURE_MAX_AGE_SECONDS = 300
 HUBSPOT_FILES_FOLDER_ROOT = (os.getenv("HUBSPOT_FILES_FOLDER_ROOT", "/level-health/quote-attachments") or "").strip()
+HUBSPOT_ATTACHMENTS_CREATE_NOTES = os.getenv(
+    "HUBSPOT_ATTACHMENTS_CREATE_NOTES",
+    "false",
+).strip().lower() in {"1", "true", "yes", "on"}
 HUBSPOT_TICKET_RESERVED_PROPERTIES = {
     "subject",
     "content",
@@ -4920,13 +4924,15 @@ def sync_hubspot_ticket_file_attachments(
                 source_path=Path(source_path_text),
                 source_filename=filename,
             )
-            hubspot_note_id = create_hubspot_note_with_attachment(
-                token,
-                ticket_id=ticket_key,
-                file_id=hubspot_file_id,
-                filename=filename,
-                quote_id=quote_key,
-            )
+            hubspot_note_id = ""
+            if HUBSPOT_ATTACHMENTS_CREATE_NOTES:
+                hubspot_note_id = create_hubspot_note_with_attachment(
+                    token,
+                    ticket_id=ticket_key,
+                    file_id=hubspot_file_id,
+                    filename=filename,
+                    quote_id=quote_key,
+                )
             record_hubspot_attachment_sync(
                 conn,
                 upload_id=upload_id,
