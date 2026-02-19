@@ -142,6 +142,7 @@ HUBSPOT_SYNC_DETAIL_FIELDS = (
     "stoploss",
     "current_carrier",
     "renewal_comparison",
+    "proposal_url",
 )
 
 BROKER_ADMIN_ONLY_TASKS = {"Vendors Notified", "Ventegra vZip"}

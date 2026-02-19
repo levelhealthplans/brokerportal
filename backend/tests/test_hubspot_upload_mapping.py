@@ -367,6 +367,7 @@ class HubspotUploadMappingTests(unittest.TestCase):
                 "stoploss": "level_health_stoploss",
                 "current_carrier": "level_health_current_carrier",
                 "renewal_comparison": "level_health_renewal_comparison",
+                "proposal_url": "level_health_proposal_url",
             },
         }
         ticket = {
@@ -378,6 +379,7 @@ class HubspotUploadMappingTests(unittest.TestCase):
                 "level_health_stoploss": "Sun Life",
                 "level_health_current_carrier": "Aetna",
                 "level_health_renewal_comparison": "12% increase",
+                "level_health_proposal_url": "https://app.pandadoc.com/a/#/documents/abc123",
             }
         }
 
@@ -397,6 +399,10 @@ class HubspotUploadMappingTests(unittest.TestCase):
         self.assertEqual(refreshed["stoploss"], "Sun Life")
         self.assertEqual(refreshed["current_carrier"], "Aetna")
         self.assertEqual(refreshed["renewal_comparison"], "12% increase")
+        self.assertEqual(
+            refreshed["proposal_url"],
+            "https://app.pandadoc.com/a/#/documents/abc123",
+        )
 
     def test_sync_hubspot_ticket_file_attachments_is_idempotent(self) -> None:
         quote = self._create_quote()
