@@ -2162,64 +2162,68 @@ export default function QuoteDetail() {
       </section>
 
       <section className="section">
-        <h2>Uploads</h2>
-        <div className="form-grid">
-          <label>
-            Add Census
-            <input
-              type="file"
-              multiple
-              onChange={(e) => handleUpload(e, "census")}
-            />
-          </label>
-          <label>
-            Renewal
-            <input
-              type="file"
-              multiple
-              onChange={(e) => handleUpload(e, "renewal")}
-            />
-          </label>
-          <label>
-            SBC
-            <input
-              type="file"
-              multiple
-              onChange={(e) => handleUpload(e, "sbc")}
-            />
-          </label>
-          <label>
-            Claims
-            <input
-              type="file"
-              multiple
-              onChange={(e) => handleUpload(e, "claims")}
-            />
-          </label>
-        </div>
-        {uploads.length === 0 && <div className="helper">No uploads yet.</div>}
-        {uploads.map((upload) => (
-          <div key={upload.id} className="card-row">
-            <div>
-              <strong>{upload.filename}</strong>
-              <div className="helper">
-                {upload.type} · {new Date(upload.created_at).toLocaleString()}
+        <details className="config-collapse">
+          <summary>Uploads ({uploads.length})</summary>
+          <div className="config-collapse-body">
+            <div className="form-grid">
+              <label>
+                Add Census
+                <input
+                  type="file"
+                  multiple
+                  onChange={(e) => handleUpload(e, "census")}
+                />
+              </label>
+              <label>
+                Renewal
+                <input
+                  type="file"
+                  multiple
+                  onChange={(e) => handleUpload(e, "renewal")}
+                />
+              </label>
+              <label>
+                SBC
+                <input
+                  type="file"
+                  multiple
+                  onChange={(e) => handleUpload(e, "sbc")}
+                />
+              </label>
+              <label>
+                Claims
+                <input
+                  type="file"
+                  multiple
+                  onChange={(e) => handleUpload(e, "claims")}
+                />
+              </label>
+            </div>
+            {uploads.length === 0 && <div className="helper">No uploads yet.</div>}
+            {uploads.map((upload) => (
+              <div key={upload.id} className="card-row">
+                <div>
+                  <strong>{upload.filename}</strong>
+                  <div className="helper">
+                    {upload.type} · {new Date(upload.created_at).toLocaleString()}
+                  </div>
+                </div>
+                <div className="inline-actions">
+                  <a className="button secondary" href={uploadUrl(upload.path)}>
+                    View
+                  </a>
+                  <button
+                    className="button ghost"
+                    type="button"
+                    onClick={() => handleDeleteUpload(upload.id)}
+                  >
+                    Delete
+                  </button>
+                </div>
               </div>
-            </div>
-            <div className="inline-actions">
-              <a className="button secondary" href={uploadUrl(upload.path)}>
-                View
-              </a>
-              <button
-                className="button ghost"
-                type="button"
-                onClick={() => handleDeleteUpload(upload.id)}
-              >
-                Delete
-              </button>
-            </div>
+            ))}
           </div>
-        ))}
+        </details>
       </section>
 
       <section className="section">
