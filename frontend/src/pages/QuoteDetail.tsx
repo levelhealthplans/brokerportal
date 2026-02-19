@@ -2167,11 +2167,26 @@ export default function QuoteDetail() {
           <div className="config-collapse-body">
             <div className="form-grid">
               <label>
-                Add Census
+                Member-Level Census
+                <input
+                  type="file"
+                  onChange={(e) => handleUpload(e, "census")}
+                />
+              </label>
+              <label>
+                SBC (multiple allowed)
                 <input
                   type="file"
                   multiple
-                  onChange={(e) => handleUpload(e, "census")}
+                  onChange={(e) => handleUpload(e, "sbc")}
+                />
+              </label>
+              <label>
+                Current Pricing
+                <input
+                  type="file"
+                  multiple
+                  onChange={(e) => handleUpload(e, "current_pricing")}
                 />
               </label>
               <label>
@@ -2183,19 +2198,37 @@ export default function QuoteDetail() {
                 />
               </label>
               <label>
-                SBC
+                High Cost Claimant Report
                 <input
                   type="file"
                   multiple
-                  onChange={(e) => handleUpload(e, "sbc")}
+                  onChange={(e) =>
+                    handleUpload(e, "high_cost_claimant_report")
+                  }
                 />
               </label>
               <label>
-                Claims
+                Aggregate Report
                 <input
                   type="file"
                   multiple
-                  onChange={(e) => handleUpload(e, "claims")}
+                  onChange={(e) => handleUpload(e, "aggregate_report")}
+                />
+              </label>
+              <label>
+                Other Claims Data
+                <input
+                  type="file"
+                  multiple
+                  onChange={(e) => handleUpload(e, "other_claims_data")}
+                />
+              </label>
+              <label>
+                Upload Other Files
+                <input
+                  type="file"
+                  multiple
+                  onChange={(e) => handleUpload(e, "other_files")}
                 />
               </label>
             </div>
