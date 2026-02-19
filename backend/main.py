@@ -2834,6 +2834,18 @@ def normalize_census_dob(value: str) -> tuple[bool, str]:
         return False, raw
 
     today_date = datetime.utcnow().date()
+
+    # Handle Excel date serial values commonly found in exported census files.
+    # Example: 26076 -> 1971-05-18.
+    if re.fullmatch(r"\d+(?:\.\d+)?", raw):
+        try:
+            serial_value = float(raw)
+            parsed_date = date(1899, 12, 30) + timedelta(days=int(serial_value))
+            if date(1900, 1, 1) <= parsed_date <= today_date:
+                return True, parsed_date.isoformat()
+        except Exception:
+            pass
+
     date_only_formats = (
         ("%m/%d/%Y", False),
         ("%m/%d/%y", True),
@@ -7833,10 +7845,18 @@ def run_standardization(
         required_fields = {
             "first_name": ["first name", "firstname", "first_name"],
             "last_name": ["last name", "lastname", "last_name"],
-            "dob": ["dob", "date of birth", "birthdate"],
-            "zip": ["zip", "zipcode", "zip code", "postal code"],
+            "dob": [
+                "dob",
+                "date of birth",
+                "birthdate",
+                "mbr dob",
+                "member dob",
+                "mbr date of birth",
+                "member date of birth",
+            ],
+            "zip": ["zip", "zipcode", "zip code", "postal code", "home zip code", "home zipcode"],
             "gender": ["gender", "sex"],
-            "relationship": ["relationship", "rel"],
+            "relationship": ["relationship", "rel", "relat"],
             "enrollment_tier": ["enrollment tier", "tier", "coverage tier"],
         }
 
@@ -8012,7 +8032,12 @@ def run_standardization(
                     continue
 
                 if key == "gender":
-                    mapped = gender_map.get(raw_value.lower(), raw_value).upper()
+                    default_gender_map = {"m": "M", "male": "M", "f": "F", "female": "F"}
+                    mapped = (
+                        gender_map.get(raw_value.lower())
+                        or default_gender_map.get(raw_value.lower())
+                        or raw_value
+                    ).upper()
                     standardized_row[key] = mapped
                     if mapped not in allowed_gender:
                         add_issue(
