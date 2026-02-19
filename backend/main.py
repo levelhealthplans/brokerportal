@@ -2833,26 +2833,39 @@ def normalize_census_dob(value: str) -> tuple[bool, str]:
     if not raw:
         return False, raw
 
-    date_only_formats = ("%m/%d/%Y", "%Y-%m-%d", "%Y/%m/%d")
-    for fmt in date_only_formats:
+    today_date = datetime.utcnow().date()
+    date_only_formats = (
+        ("%m/%d/%Y", False),
+        ("%m/%d/%y", True),
+        ("%Y-%m-%d", False),
+        ("%Y/%m/%d", False),
+    )
+    for fmt, is_two_digit_year in date_only_formats:
         try:
-            datetime.strptime(raw, fmt)
-            return True, raw
+            parsed_date = datetime.strptime(raw, fmt).date()
+            if is_two_digit_year and parsed_date > today_date:
+                parsed_date = parsed_date.replace(year=parsed_date.year - 100)
+            return True, parsed_date.isoformat()
         except ValueError:
             continue
 
     datetime_formats = (
-        "%m/%d/%Y %H:%M",
-        "%m/%d/%Y %H:%M:%S",
-        "%Y-%m-%d %H:%M",
-        "%Y-%m-%d %H:%M:%S",
-        "%Y/%m/%d %H:%M",
-        "%Y/%m/%d %H:%M:%S",
+        ("%m/%d/%Y %H:%M", False),
+        ("%m/%d/%Y %H:%M:%S", False),
+        ("%m/%d/%y %H:%M", True),
+        ("%m/%d/%y %H:%M:%S", True),
+        ("%Y-%m-%d %H:%M", False),
+        ("%Y-%m-%d %H:%M:%S", False),
+        ("%Y/%m/%d %H:%M", False),
+        ("%Y/%m/%d %H:%M:%S", False),
     )
-    for fmt in datetime_formats:
+    for fmt, is_two_digit_year in datetime_formats:
         try:
             parsed = datetime.strptime(raw, fmt)
-            return True, parsed.date().isoformat()
+            parsed_date = parsed.date()
+            if is_two_digit_year and parsed_date > today_date:
+                parsed_date = parsed_date.replace(year=parsed_date.year - 100)
+            return True, parsed_date.isoformat()
         except ValueError:
             continue
 
@@ -2865,10 +2878,12 @@ def normalize_census_dob(value: str) -> tuple[bool, str]:
 
     # Handle common export values like "YYYY-MM-DD 00:00:00" by parsing the first token.
     first_token = raw.split()[0] if " " in raw else raw
-    for fmt in date_only_formats:
+    for fmt, is_two_digit_year in date_only_formats:
         try:
-            datetime.strptime(first_token, fmt)
-            return True, first_token
+            parsed_date = datetime.strptime(first_token, fmt).date()
+            if is_two_digit_year and parsed_date > today_date:
+                parsed_date = parsed_date.replace(year=parsed_date.year - 100)
+            return True, parsed_date.isoformat()
         except ValueError:
             continue
 
