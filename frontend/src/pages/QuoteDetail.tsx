@@ -1081,46 +1081,25 @@ export default function QuoteDetail() {
     }
   };
 
-  const handleApplyBulkFix = async (reRunCheck: boolean) => {
+  const handleApplyBulkFix = () => {
     setError(null);
-    const nextMappings = applyBulkMapping(
+    applyBulkMapping(
       bulkFixField,
       bulkFixSourceValue,
       bulkFixTargetValue,
     );
-    if (!nextMappings || !reRunCheck) return;
-    setBusy(true);
-    try {
-      await runWizardStandardize(nextMappings);
-    } catch (err: any) {
-      setError(err.message);
-    } finally {
-      setBusy(false);
-    }
   };
 
-  const handleApplySmartSuggestion = async (
-    suggestion: SmartSuggestion,
-    reRunCheck: boolean,
-  ) => {
+  const handleApplySmartSuggestion = (suggestion: SmartSuggestion) => {
     setError(null);
     setBulkFixField(suggestion.field);
     setBulkFixSourceValue(suggestion.sourceValue);
     setBulkFixTargetValue(suggestion.targetValue);
-    const nextMappings = applyBulkMapping(
+    applyBulkMapping(
       suggestion.field,
       suggestion.sourceValue,
       suggestion.targetValue,
     );
-    if (!nextMappings || !reRunCheck) return;
-    setBusy(true);
-    try {
-      await runWizardStandardize(nextMappings);
-    } catch (err: any) {
-      setError(err.message);
-    } finally {
-      setBusy(false);
-    }
   };
 
   const handleWizardResolve = async () => {
@@ -2748,20 +2727,12 @@ export default function QuoteDetail() {
                             <span className="badge success">Mapped</span>
                           )}
                           <button
-                            className="button ghost"
-                            type="button"
-                            onClick={() => void handleApplySmartSuggestion(suggestion, false)}
-                            disabled={busy}
-                          >
-                            Apply
-                          </button>
-                          <button
                             className="button secondary"
                             type="button"
-                            onClick={() => void handleApplySmartSuggestion(suggestion, true)}
+                            onClick={() => handleApplySmartSuggestion(suggestion)}
                             disabled={busy}
                           >
-                            Apply &amp; Run
+                            Use Suggestion
                           </button>
                         </div>
                       </div>
@@ -2816,18 +2787,18 @@ export default function QuoteDetail() {
                 <button
                   className="button ghost"
                   type="button"
-                  onClick={() => void handleApplyBulkFix(false)}
+                  onClick={handleApplyBulkFix}
                   disabled={busy}
                 >
-                  Apply Bulk Fix
+                  Apply Manual Fix
                 </button>
                 <button
                   className="button secondary"
                   type="button"
-                  onClick={() => void handleApplyBulkFix(true)}
+                  onClick={handleWizardStandardize}
                   disabled={busy}
                 >
-                  Apply &amp; Run Check
+                  Run Check Now
                 </button>
               </div>
               </section>
@@ -3083,7 +3054,7 @@ export default function QuoteDetail() {
                                   setBulkFixTargetValue(
                                     String(activeIssue.mapped_value || ""),
                                   );
-                                  void handleApplyBulkFix(false);
+                                  handleApplyBulkFix();
                                 }}
                                 disabled={
                                   busy ||
@@ -3091,7 +3062,7 @@ export default function QuoteDetail() {
                                   !String(activeIssue.mapped_value || "").trim()
                                 }
                               >
-                                Apply To All Matching Values
+                                Use as Bulk Fix
                               </button>
                             </>
                           )}
