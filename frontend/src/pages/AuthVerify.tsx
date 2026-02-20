@@ -35,7 +35,7 @@ export default function AuthVerify() {
     <section className="section" style={{ maxWidth: 460, margin: "48px auto" }}>
       <h2>Magic Link Verification</h2>
       {status === "loading" && <div className="helper">Signing you in...</div>}
-      {status === "error" && <div className="notice">{error}</div>}
+      {status === "error" && <div className="notice notice-error">{error}</div>}
     </section>
   );
 }

@@ -152,7 +152,7 @@ export default function NewQuote() {
   return (
     <section className="section">
       <h2>New Quote</h2>
-      {error && <div className="notice">{error}</div>}
+      {error && <div className="notice notice-error">{error}</div>}
       <form onSubmit={(event) => event.preventDefault()}>
         {step === "info" && (
           <>

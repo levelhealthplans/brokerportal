@@ -48,7 +48,7 @@ export default function ImplementationsList() {
   return (
     <section className="section">
       <h2>Implementations</h2>
-      {error && <div className="notice">{error}</div>}
+      {error && <div className="notice notice-error">{error}</div>}
       <div className="table-scroll">
         <table className="table">
           <thead>

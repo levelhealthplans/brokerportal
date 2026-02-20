@@ -89,7 +89,7 @@ export default function OrganizationDetail() {
         </Link>
       </div>
 
-      {error && <div className="notice">{error}</div>}
+      {error && <div className="notice notice-error">{error}</div>}
 
       <div className="kv" style={{ marginTop: 8 }}>
         <strong>Name</strong>

@@ -796,7 +796,7 @@ export default function Configuration() {
       <div className="helper" style={{ marginBottom: 8 }}>
         Tables on this page are limited to 25 rows per page.
       </div>
-      {error && <div className="notice">{error}</div>}
+      {error && <div className="notice notice-error">{error}</div>}
       {statusMessage && (
         <div
           className={`notice notice-success ${statusMessageFading ? "fade-out" : ""}`}

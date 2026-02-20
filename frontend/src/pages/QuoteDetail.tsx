@@ -301,6 +301,15 @@ export default function QuoteDetail() {
     }
   };
 
+  const showWizardPopup = (
+    type: "success" | "error",
+    message: string,
+  ) => {
+    const title =
+      type === "success" ? "Census Update Successful" : "Census Update Failed";
+    window.alert(`${title}\n\n${message}`);
+  };
+
   const requiredHeaderLabels: Record<string, string> = {
     first_name: "First Name",
     last_name: "Last Name",
@@ -580,17 +589,25 @@ export default function QuoteDetail() {
         if (shouldSubmit && result.issue_count === 0) {
           return updateQuote(quoteId, { status: "Quote Submitted" })
             .then(() => assignNetwork(quoteId))
-            .then(() =>
-              setStatusMessage(
-                "Submission complete. Network assignment started.",
-              ),
-            )
+            .then(() => {
+              setStatusMessage("Submission complete. Network assignment started.");
+              showWizardPopup(
+                "success",
+                "Census submitted successfully. Network assignment has started.",
+              );
+            })
             .then(() => setWizardOpen(false))
             .then(() => refresh())
             .then(() => setTimeout(jumpToAssignment, 200));
         }
       })
-      .catch(() => {
+      .catch((err: any) => {
+        if (shouldSubmit) {
+          showWizardPopup(
+            "error",
+            err?.message || "Unable to auto-submit census. Please review the wizard.",
+          );
+        }
         // fallback to just opening the wizard
       });
   }, [location.search, autoOpened, quoteId]);
@@ -1129,12 +1146,21 @@ export default function QuoteDetail() {
         await updateQuote(quoteId, { status: "Quote Submitted" });
         await assignNetwork(quoteId);
         setStatusMessage("Submission complete. Network assignment started.");
+        showWizardPopup(
+          "success",
+          "Census saved and submitted successfully. Network assignment has started.",
+        );
         setWizardOpen(false);
         setTimeout(jumpToAssignment, 200);
+      } else {
+        setStatusMessage("Census corrections saved.");
+        showWizardPopup("success", "Census corrections were saved successfully.");
       }
       refresh();
     } catch (err: any) {
-      setError(err.message);
+      const message = err?.message || "Unable to save census corrections.";
+      setError(message);
+      showWizardPopup("error", message);
     } finally {
       setBusy(false);
     }
@@ -1145,19 +1171,25 @@ export default function QuoteDetail() {
     setError(null);
     try {
       if (!hasCensusUpload) {
-        setError("Upload a census before submitting.");
+        const message = "Upload a census before submitting.";
+        setError(message);
+        showWizardPopup("error", message);
         setWizardStep(1);
         return;
       }
 
       if (missingRequiredHeaderKeys.length > 0) {
-        setError("Map all required columns before submitting.");
+        const message = "Map all required columns before submitting.";
+        setError(message);
+        showWizardPopup("error", message);
         setWizardStep(1);
         return;
       }
 
       if (!hasRunWizardCheck) {
-        setError("Run Check before submitting so all validations are current.");
+        const message = "Run Check before submitting so all validations are current.";
+        setError(message);
+        showWizardPopup("error", message);
         setWizardStep(1);
         return;
       }
@@ -1171,9 +1203,9 @@ export default function QuoteDetail() {
       }
 
       if (remainingIssues.length > 0) {
-        setError(
-          `Please resolve all census issues before submitting. ${remainingIssues.length} issue(s) remain.`,
-        );
+        const message = `Please resolve all census issues before submitting. ${remainingIssues.length} issue(s) remain.`;
+        setError(message);
+        showWizardPopup("error", message);
         setWizardStep(3);
         return;
       }
@@ -1181,11 +1213,17 @@ export default function QuoteDetail() {
       await updateQuote(quoteId, { status: "Quote Submitted" });
       await assignNetwork(quoteId);
       setStatusMessage("Submission complete. Network assignment started.");
+      showWizardPopup(
+        "success",
+        "Census submitted successfully. Network assignment has started.",
+      );
       setWizardOpen(false);
       refresh();
       setTimeout(jumpToAssignment, 200);
     } catch (err: any) {
-      setError(err.message);
+      const message = err?.message || "Unable to submit census.";
+      setError(message);
+      showWizardPopup("error", message);
     } finally {
       setBusy(false);
     }
@@ -1558,7 +1596,7 @@ export default function QuoteDetail() {
   return (
     <div className="section">
       <h2>Quote Detail</h2>
-      {error && <div className="notice">{error}</div>}
+      {error && <div className="notice notice-error">{error}</div>}
       {statusMessage && (
         <div
           className={`notice notice-success ${statusMessageFading ? "fade-out" : ""}`}

@@ -349,7 +349,7 @@ export default function Users() {
           Create User
         </button>
       </div>
-      {error && <div className="notice">{error}</div>}
+      {error && <div className="notice notice-error">{error}</div>}
       {statusMessage && (
         <div
           className={`notice notice-success ${statusMessageFading ? "fade-out" : ""}`}

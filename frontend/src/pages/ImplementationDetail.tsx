@@ -489,7 +489,7 @@ export default function ImplementationDetail() {
   return (
     <div className="section">
       <h2>Implementation Detail</h2>
-      {error && <div className="notice">{error}</div>}
+      {error && <div className="notice notice-error">{error}</div>}
       {statusMessage && (
         <div className={`notice notice-success ${statusMessageFading ? "fade-out" : ""}`}>
           {statusMessage}
@@ -660,7 +660,7 @@ export default function ImplementationDetail() {
                 Close
               </button>
             </div>
-            {hubspotFormError && <div className="notice">{hubspotFormError}</div>}
+            {hubspotFormError && <div className="notice notice-error">{hubspotFormError}</div>}
             <div
               id="implementation-hubspot-form-container"
               className="hubspot-form-container"

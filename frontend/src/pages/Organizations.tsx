@@ -193,7 +193,7 @@ export default function Organizations() {
           Create Organization
         </button>
       </div>
-      {error && <div className="notice">{error}</div>}
+      {error && <div className="notice notice-error">{error}</div>}
 
       {createModalOpen && (
         <div

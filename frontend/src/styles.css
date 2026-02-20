@@ -1202,13 +1202,19 @@ textarea:focus {
 .notice {
   padding: 12px 16px;
   border-radius: 12px;
-  background: #ffe3e5;
-  border: 1px solid #f0b3bb;
+  background: #e9f1ff;
+  border: 1px solid #bbcaed;
   font-size: 13px;
-  color: #8d2f43;
+  color: #1e328f;
   transition:
     opacity 0.45s ease,
     transform 0.45s ease;
+}
+
+.notice.notice-error {
+  background: #ffe3e5;
+  border-color: #f0b3bb;
+  color: #8d2f43;
 }
 
 .notice.notice-success {

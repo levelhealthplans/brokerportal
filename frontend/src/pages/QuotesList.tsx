@@ -245,7 +245,7 @@ export default function QuotesList() {
       {statusMessage && (
         <div className="notice notice-success">{statusMessage}</div>
       )}
-      {error && <div className="notice">{error}</div>}
+      {error && <div className="notice notice-error">{error}</div>}
       <div
         ref={filtersRef}
         className="inline-actions"

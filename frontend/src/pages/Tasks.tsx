@@ -403,7 +403,7 @@ export default function Tasks() {
       {statusMessage && (
         <div className="notice notice-success">{statusMessage}</div>
       )}
-      {error && <div className="notice">{error}</div>}
+      {error && <div className="notice notice-error">{error}</div>}
       <div className="grid grid-3" style={{ marginBottom: 12 }}>
         <div className="section" style={{ marginBottom: 0 }}>
           <div className="helper">Total Tasks</div>

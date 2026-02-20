@@ -148,8 +148,8 @@ export default function Login() {
                 Use password sign-in or receive a one-time magic link by email.
               </div>
             </form>
-            {error && <div className="notice login-notice">{error}</div>}
-            {magicError && <div className="notice login-notice">{magicError}</div>}
+            {error && <div className="notice notice-error login-notice">{error}</div>}
+            {magicError && <div className="notice notice-error login-notice">{magicError}</div>}
             {magicMessage && <div className="notice notice-success login-notice">{magicMessage}</div>}
             {devMagicLink && (
               <div className="helper" style={{ marginTop: 8 }}>
@@ -217,7 +217,7 @@ export default function Login() {
                 </div>
               </form>
             )}
-            {accessError && <div className="notice login-notice">{accessError}</div>}
+            {accessError && <div className="notice notice-error login-notice">{accessError}</div>}
             {accessMessage && <div className="notice notice-success login-notice">{accessMessage}</div>}
           </div>
         </section>

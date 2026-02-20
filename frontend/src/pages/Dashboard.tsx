@@ -361,7 +361,7 @@ export default function Dashboard() {
         </div>
       </section>
 
-      {error && <div className="notice">{error}</div>}
+      {error && <div className="notice notice-error">{error}</div>}
       {loading && <div className="section">Loading home page...</div>}
 
       {!loading && (
