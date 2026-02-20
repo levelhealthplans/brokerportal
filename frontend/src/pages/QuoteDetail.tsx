@@ -604,6 +604,14 @@ export default function QuoteDetail() {
     if (!data?.standardizations.length) return null;
     return data.standardizations[0];
   }, [data]);
+  const latestCensusUpload = useMemo(() => {
+    if (!data?.uploads?.length) return null;
+    return (
+      data.uploads.find(
+        (upload) => String(upload.type || "").trim().toLowerCase() === "census",
+      ) || null
+    );
+  }, [data?.uploads]);
   const latestGroupSummary = latestAssignment?.result_json.group_summary || null;
   const latestConfidencePercent = latestAssignment
     ? Math.round(latestAssignment.confidence * 100)
@@ -721,8 +729,8 @@ export default function QuoteDetail() {
     [headerMappings, requiredHeaderLabels],
   );
   const hasCensusUpload = useMemo(
-    () => Boolean(data?.uploads?.some((upload) => upload.type === "census")),
-    [data?.uploads],
+    () => Boolean(latestCensusUpload),
+    [latestCensusUpload],
   );
   const hasRunWizardCheck = Boolean(wizardStatus);
   const wizardSubmitReady =
@@ -1297,10 +1305,18 @@ export default function QuoteDetail() {
     setBusy(true);
     setError(null);
     try {
-      await Promise.all(
+      const uploaded = await Promise.all(
         files.map((file) => uploadFile(quoteId, file, uploadType)),
       );
-      setStatusMessage("Upload complete.");
+      if (uploadType === "census") {
+        const latest = uploaded[uploaded.length - 1];
+        const replacedAt = latest?.created_at
+          ? new Date(latest.created_at).toLocaleString()
+          : new Date().toLocaleString();
+        setStatusMessage(`Census replaced for all users at ${replacedAt}.`);
+      } else {
+        setStatusMessage("Upload complete.");
+      }
       refresh();
     } catch (err: any) {
       setError(err.message);
@@ -1317,9 +1333,14 @@ export default function QuoteDetail() {
     setBusy(true);
     setError(null);
     try {
-      await Promise.all(
+      const uploaded = await Promise.all(
         files.map((file) => uploadFile(quoteId, file, "census")),
       );
+      const latest = uploaded[uploaded.length - 1];
+      const replacedAt = latest?.created_at
+        ? new Date(latest.created_at).toLocaleString()
+        : new Date().toLocaleString();
+      setStatusMessage(`Census replaced for all users at ${replacedAt}.`);
       await runWizardStandardize(valueMappings);
     } catch (err: any) {
       setError(err.message);
@@ -1955,8 +1976,10 @@ export default function QuoteDetail() {
         <div className="card-row">
           <div>
             <strong>
-              {latestStandardization
-                ? latestStandardization.status
+              {latestCensusUpload
+                ? latestStandardization
+                  ? latestStandardization.status
+                  : "Census Uploaded"
                 : "No Census Uploaded"}
             </strong>
             <div className="helper">
@@ -1964,8 +1987,15 @@ export default function QuoteDetail() {
                 ? `${latestStandardization.issue_count} issue(s) · ${new Date(
                     latestStandardization.created_at,
                   ).toLocaleString()}`
-                : "Upload a census to get started."}
+                : latestCensusUpload
+                  ? `Uploaded ${new Date(latestCensusUpload.created_at).toLocaleString()}`
+                  : "Upload a census to get started."}
             </div>
+            {latestCensusUpload && (
+              <div className="helper">
+                Current census: {latestCensusUpload.filename}
+              </div>
+            )}
           </div>
           <button className="button secondary" onClick={openWizard}>
             Upload Census

@@ -5628,13 +5628,27 @@ def save_upload(quote_id: str, upload_type: str, file: UploadFile) -> UploadOut:
     quote_dir = UPLOADS_DIR / quote_id
     quote_dir.mkdir(parents=True, exist_ok=True)
     file_id = str(uuid.uuid4())
-    safe_name = file.filename or f"upload-{file_id}"
+    normalized_upload_type = (upload_type or "").strip().lower()
+    original_name = Path(file.filename or f"upload-{file_id}").name
+    created_at = now_iso()
+    if normalized_upload_type == "census":
+        upload_stamp = datetime.utcnow().strftime("%Y%m%d-%H%M%S")
+        safe_name = f"{upload_stamp}-{original_name}"
+    else:
+        safe_name = original_name
     target_path = quote_dir / f"{file_id}-{safe_name}"
+    with target_path.open("wb") as f:
+        f.write(file.file.read())
+    paths_to_remove: List[Path] = []
+
     with get_db() as conn:
-        if upload_type == "census":
-            cur = conn.cursor()
+        cur = conn.cursor()
+        if normalized_upload_type == "census":
             cur.execute(
-                "SELECT * FROM Upload WHERE quote_id = ? AND type = 'census'",
+                """
+                SELECT id, path FROM Upload
+                WHERE quote_id = ? AND lower(trim(type)) = 'census'
+                """,
                 (quote_id,),
             )
             existing = cur.fetchall()
@@ -5643,13 +5657,16 @@ def save_upload(quote_id: str, upload_type: str, file: UploadFile) -> UploadOut:
                 for row in existing
                 if str(row["id"] or "").strip()
             ]
-            for row in existing:
-                try:
-                    Path(row["path"]).unlink(missing_ok=True)
-                except Exception:
-                    pass
+            paths_to_remove = [
+                Path(str(row["path"]))
+                for row in existing
+                if str(row["path"] or "").strip()
+            ]
             cur.execute(
-                "DELETE FROM Upload WHERE quote_id = ? AND type = 'census'",
+                """
+                DELETE FROM Upload
+                WHERE quote_id = ? AND lower(trim(type)) = 'census'
+                """,
                 (quote_id,),
             )
             if existing_ids:
@@ -5662,27 +5679,33 @@ def save_upload(quote_id: str, upload_type: str, file: UploadFile) -> UploadOut:
                 "UPDATE Quote SET manual_network = NULL, updated_at = ? WHERE id = ?",
                 (now_iso(), quote_id),
             )
-            conn.commit()
-    with target_path.open("wb") as f:
-        f.write(file.file.read())
-    created_at = now_iso()
-
-    with get_db() as conn:
-        cur = conn.cursor()
         cur.execute(
             """
             INSERT INTO Upload (id, quote_id, type, filename, path, created_at)
             VALUES (?, ?, ?, ?, ?, ?)
             """,
-            (file_id, quote_id, upload_type, safe_name, str(target_path), created_at),
+            (
+                file_id,
+                quote_id,
+                normalized_upload_type,
+                safe_name,
+                str(target_path),
+                created_at,
+            ),
         )
         conn.commit()
         recompute_needs_action(conn, quote_id)
 
+    for old_path in paths_to_remove:
+        try:
+            old_path.unlink(missing_ok=True)
+        except Exception:
+            pass
+
     return UploadOut(
         id=file_id,
         quote_id=quote_id,
-        type=upload_type,
+        type=normalized_upload_type,
         filename=safe_name,
         path=str(target_path),
         created_at=created_at,

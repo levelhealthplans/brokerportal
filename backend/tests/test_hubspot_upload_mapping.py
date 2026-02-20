@@ -464,6 +464,40 @@ class HubspotUploadMappingTests(unittest.TestCase):
             self.assertEqual(result["status"], "deleted")
             sync_mock.assert_called_with(quote.id, create_if_missing=True)
 
+    def test_census_upload_replaces_existing_and_adds_timestamp_to_filename(self) -> None:
+        quote = self._create_quote()
+
+        with patch.object(main, "sync_quote_to_hubspot_async", return_value=None):
+            first = main.upload_quote_file(
+                quote.id,
+                type="census",
+                file=UploadFile(filename="members-old.csv", file=io.BytesIO(b"zip\n63101\n")),
+            )
+            second = main.upload_quote_file(
+                quote.id,
+                type="census",
+                file=UploadFile(filename="members-new.csv", file=io.BytesIO(b"zip\n63102\n")),
+            )
+
+        with main.get_db() as conn:
+            cur = conn.cursor()
+            cur.execute(
+                """
+                SELECT id, filename, path, type
+                FROM Upload
+                WHERE quote_id = ? AND lower(trim(type)) = 'census'
+                """,
+                (quote.id,),
+            )
+            rows = cur.fetchall()
+
+        self.assertEqual(len(rows), 1)
+        self.assertEqual(rows[0]["id"], second.id)
+        self.assertEqual(rows[0]["type"], "census")
+        self.assertRegex(rows[0]["filename"], r"^\d{8}-\d{6}-members-new\.csv$")
+        self.assertFalse(Path(first.path).exists())
+        self.assertTrue(Path(second.path).exists())
+
     def test_associate_hubspot_note_to_ticket_prefers_v4_default(self) -> None:
         with patch.object(main, "associate_hubspot_records_default", return_value=None) as assoc_mock, patch.object(
             main, "hubspot_api_request"
