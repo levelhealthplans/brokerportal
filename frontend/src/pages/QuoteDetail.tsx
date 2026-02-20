@@ -613,6 +613,14 @@ export default function QuoteDetail() {
     );
   }, [data?.uploads]);
   const latestGroupSummary = latestAssignment?.result_json.group_summary || null;
+  const hasOutstandingCensusIssues = Boolean(
+    latestStandardization && latestStandardization.issue_count > 0,
+  );
+  const censusActionLabel = !latestCensusUpload
+    ? "Upload Census"
+    : hasOutstandingCensusIssues
+      ? "Resolve Census Issues"
+      : "Open Census Wizard";
   const latestConfidencePercent = latestAssignment
     ? Math.round(latestAssignment.confidence * 100)
     : null;
@@ -962,7 +970,7 @@ export default function QuoteDetail() {
 
   const openWizard = () => {
     setWizardOpen(true);
-    setWizardStep(1);
+    setWizardStep(hasOutstandingCensusIssues ? 3 : 1);
     setWizardView("fix_queue");
     setShowIssueRowsOnly(false);
     setShowResolvedIssues(false);
@@ -1996,9 +2004,19 @@ export default function QuoteDetail() {
                 Current census: {latestCensusUpload.filename}
               </div>
             )}
+            {hasOutstandingCensusIssues && (
+              <div className="helper" style={{ marginTop: 6 }}>
+                Census has open issues. Click "{censusActionLabel}" to reopen the wizard.
+              </div>
+            )}
+            {!hasOutstandingCensusIssues && latestStandardization && (
+              <div className="helper" style={{ marginTop: 6 }}>
+                Census checks are clear. Reopen the wizard any time to re-check.
+              </div>
+            )}
           </div>
           <button className="button secondary" onClick={openWizard}>
-            Upload Census
+            {censusActionLabel}
           </button>
         </div>
       </section>
