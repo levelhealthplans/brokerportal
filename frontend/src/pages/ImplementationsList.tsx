@@ -77,12 +77,16 @@ export default function ImplementationsList() {
                   <span className="badge success">{installation.status}</span>
                 </td>
                 <td>
-                  <Link
-                    className="table-link"
-                    to={`/implementations/${installation.id}`}
-                  >
-                    {openTasks[installation.id] ?? "—"}
-                  </Link>
+                  <div className="inline-actions" style={{ gap: 8, alignItems: "center" }}>
+                    <span>{openTasks[installation.id] ?? "—"}</span>
+                    <Link
+                      className="button subtle"
+                      style={{ padding: "4px 10px", minHeight: 0 }}
+                      to={`/implementations/${installation.id}`}
+                    >
+                      Go
+                    </Link>
+                  </div>
                 </td>
               </tr>
             ))}
