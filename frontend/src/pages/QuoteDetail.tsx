@@ -73,6 +73,15 @@ type SmartSuggestion = {
   alreadyMapped: boolean;
 };
 
+type WizardStep = 1 | 2 | 3 | 4;
+
+const WIZARD_STEPS: Array<{ step: WizardStep; label: string }> = [
+  { step: 1, label: "Upload & Map" },
+  { step: 2, label: "Bulk Fixes" },
+  { step: 3, label: "Resolve Issues" },
+  { step: 4, label: "Validate & Submit" },
+];
+
 const normalizeSuggestionToken = (value: string) =>
   value
     .trim()
@@ -256,6 +265,7 @@ export default function QuoteDetail() {
   const [wizardView, setWizardView] = useState<"fix_queue" | "advanced">(
     "fix_queue",
   );
+  const [wizardStep, setWizardStep] = useState<WizardStep>(1);
   const [activeIssueIndex, setActiveIssueIndex] = useState(0);
   const [showIssueRowsOnly, setShowIssueRowsOnly] = useState(false);
   const [valueMappings, setValueMappings] = useState<CensusValueMappings>({
@@ -699,6 +709,27 @@ export default function QuoteDetail() {
     if (wizardIssues.length === 0) return 100;
     return Math.round((resolvedWizardIssues.length / wizardIssues.length) * 100);
   }, [wizardIssues.length, resolvedWizardIssues.length]);
+  const requiredMappedCount = useMemo(
+    () =>
+      Object.keys(requiredHeaderLabels).filter((key) => Boolean(headerMappings[key]))
+        .length,
+    [headerMappings, requiredHeaderLabels],
+  );
+  const missingRequiredHeaderKeys = useMemo(
+    () =>
+      Object.keys(requiredHeaderLabels).filter((key) => !headerMappings[key]),
+    [headerMappings, requiredHeaderLabels],
+  );
+  const hasCensusUpload = useMemo(
+    () => Boolean(data?.uploads?.some((upload) => upload.type === "census")),
+    [data?.uploads],
+  );
+  const hasRunWizardCheck = Boolean(wizardStatus);
+  const wizardSubmitReady =
+    hasCensusUpload &&
+    missingRequiredHeaderKeys.length === 0 &&
+    hasRunWizardCheck &&
+    openWizardIssues.length === 0;
   const activeIssueRowContext = useMemo(() => {
     if (!activeIssue) return null;
     return (
@@ -923,6 +954,7 @@ export default function QuoteDetail() {
 
   const openWizard = () => {
     setWizardOpen(true);
+    setWizardStep(1);
     setWizardView("fix_queue");
     setShowIssueRowsOnly(false);
     setShowResolvedIssues(false);
@@ -937,6 +969,39 @@ export default function QuoteDetail() {
     } else {
       setWizardIssues([]);
       setWizardStatus(null);
+    }
+  };
+
+  const handleWizardBackStep = () => {
+    setError(null);
+    setWizardStep((prev) => (prev <= 1 ? 1 : ((prev - 1) as WizardStep)));
+  };
+
+  const handleWizardNextStep = () => {
+    setError(null);
+    if (wizardStep === 1) {
+      if (!hasCensusUpload) {
+        setError("Upload a census file before continuing.");
+        return;
+      }
+      if (missingRequiredHeaderKeys.length > 0) {
+        setError("Map all required columns before continuing.");
+        return;
+      }
+      setWizardStep(2);
+      return;
+    }
+    if (wizardStep === 2) {
+      if (!hasRunWizardCheck) {
+        setError("Run Check at least once after mapping and fixes before continuing.");
+        return;
+      }
+      setWizardStep(3);
+      return;
+    }
+    if (wizardStep === 3) {
+      setWizardStep(4);
+      return;
     }
   };
 
@@ -1084,8 +1149,21 @@ export default function QuoteDetail() {
     setBusy(true);
     setError(null);
     try {
-      if (!data?.uploads?.some((upload) => upload.type === "census")) {
+      if (!hasCensusUpload) {
         setError("Upload a census before submitting.");
+        setWizardStep(1);
+        return;
+      }
+
+      if (missingRequiredHeaderKeys.length > 0) {
+        setError("Map all required columns before submitting.");
+        setWizardStep(1);
+        return;
+      }
+
+      if (!hasRunWizardCheck) {
+        setError("Run Check before submitting so all validations are current.");
+        setWizardStep(1);
         return;
       }
 
@@ -1098,7 +1176,10 @@ export default function QuoteDetail() {
       }
 
       if (remainingIssues.length > 0) {
-        setError("Please resolve all census issues before submitting.");
+        setError(
+          `Please resolve all census issues before submitting. ${remainingIssues.length} issue(s) remain.`,
+        );
+        setWizardStep(3);
         return;
       }
 
@@ -2387,37 +2468,25 @@ export default function QuoteDetail() {
                 Latest status: {wizardStatus}
               </div>
             )}
-            <label>
-              Upload Census
-              <input
-                type="file"
-                accept=".csv,.xls,.xlsx"
-                onChange={handleWizardCensusUpload}
-              />
-              <span className="helper">
-                We’ll automatically standardize it and surface anything that
-                needs attention.
-              </span>
-            </label>
-            <div className="inline-actions" style={{ marginTop: 10 }}>
-              <button
-                className="button ghost"
-                type="button"
-                onClick={handleClearCensus}
-                disabled={busy}
-              >
-                Remove Census
-              </button>
+            <div className="notice" style={{ marginBottom: 12 }}>
+              <strong>Guided Wizard</strong>
+              <div className="helper">
+                Step {wizardStep} of 4:{" "}
+                {WIZARD_STEPS.find((entry) => entry.step === wizardStep)?.label}
+              </div>
             </div>
-            <div className="notice" style={{ marginTop: 12 }}>
-              <strong>Step-by-Step Guide</strong>
-              <ol style={{ margin: "8px 0 0 18px" }}>
-                <li>Upload or replace the census file.</li>
-                <li>Map uploaded columns to required Level Health fields.</li>
-                <li>Use Bulk Value Fixes for recurring values (example: female to F).</li>
-                <li>Run Check to validate and refresh issue counts.</li>
-                <li>Fix remaining one-off issues, then submit.</li>
-              </ol>
+            <div className="inline-actions" style={{ marginBottom: 12 }}>
+              {WIZARD_STEPS.map((entry) => (
+                <button
+                  key={`wizard-step-${entry.step}`}
+                  className={`button subtle ${wizardStep === entry.step ? "active-chip" : ""}`}
+                  type="button"
+                  onClick={() => setWizardStep(entry.step)}
+                  disabled={busy}
+                >
+                  {entry.step}. {entry.label}
+                </button>
+              ))}
             </div>
             <div className="wizard-progress-strip" style={{ marginTop: 12 }}>
               <div className="wizard-progress-card">
@@ -2449,7 +2518,34 @@ export default function QuoteDetail() {
                 {lastRunDelta.introduced} issue(s) still open.
               </div>
             )}
-            <section style={{ marginTop: 12 }}>
+            {wizardStep === 1 && (
+              <>
+                <label>
+                  Upload Census
+                  <input
+                    type="file"
+                    accept=".csv,.xls,.xlsx"
+                    onChange={handleWizardCensusUpload}
+                  />
+                  <span className="helper">
+                    Upload the latest census first. We’ll standardize it and surface what
+                    to fix.
+                  </span>
+                </label>
+                <div className="inline-actions" style={{ marginTop: 10 }}>
+                  <button
+                    className="button ghost"
+                    type="button"
+                    onClick={handleClearCensus}
+                    disabled={busy}
+                  >
+                    Remove Census
+                  </button>
+                </div>
+              </>
+            )}
+            {wizardStep === 1 && (
+              <section style={{ marginTop: 12 }}>
               <h3>Step 1: Map Columns</h3>
               <div className="wizard-layout">
                 <aside className="wizard-sidebar">
@@ -2609,24 +2705,12 @@ export default function QuoteDetail() {
                 >
                   Run Check
                 </button>
-                <button
-                  className="button secondary"
-                  onClick={handleWizardResolve}
-                  disabled={busy || toApiIssues(wizardIssues).length === 0}
-                >
-                  Save Issue Edits
-                </button>
-                <button
-                  className="button"
-                  onClick={handleWizardSubmit}
-                  disabled={busy}
-                >
-                  Fix &amp; Submit
-                </button>
               </div>
-            </section>
+              </section>
+            )}
 
-            <section style={{ marginTop: 16 }}>
+            {wizardStep === 2 && (
+              <section style={{ marginTop: 16 }}>
               <h3>Step 2: Bulk Value Fixes</h3>
               <div className="helper" style={{ marginBottom: 8 }}>
                 Correct repeated values in one action and optionally re-run checks.
@@ -2746,9 +2830,11 @@ export default function QuoteDetail() {
                   Apply &amp; Run Check
                 </button>
               </div>
-            </section>
+              </section>
+            )}
 
-            <section style={{ marginTop: 16 }}>
+            {wizardStep === 3 && (
+              <section style={{ marginTop: 16 }}>
               <h3>Step 3: Needs Action</h3>
               {wizardStatus && (
                 <div className="helper" style={{ marginBottom: 8 }}>
@@ -2779,6 +2865,16 @@ export default function QuoteDetail() {
                   </a>
                 </div>
               )}
+              <div className="inline-actions" style={{ marginBottom: 12 }}>
+                <button
+                  className="button secondary"
+                  type="button"
+                  onClick={handleWizardResolve}
+                  disabled={busy || toApiIssues(wizardIssues).length === 0}
+                >
+                  Save Corrections
+                </button>
+              </div>
               {openWizardIssues.length === 0 && (
                 <div className="helper">
                   No open issues found. You're all set to continue.
@@ -3134,7 +3230,76 @@ export default function QuoteDetail() {
                   )}
                 </>
               )}
-            </section>
+              </section>
+            )}
+            {wizardStep === 4 && (
+              <section style={{ marginTop: 16 }}>
+                <h3>Step 4: Validate &amp; Submit</h3>
+                <div className="helper" style={{ marginBottom: 10 }}>
+                  Final checklist before submission. The button below validates all
+                  corrections and blocks submission if anything is still open.
+                </div>
+                <div className="kv">
+                  <strong>Census Uploaded</strong>
+                  <span>{hasCensusUpload ? "Yes" : "No"}</span>
+                  <strong>Required Columns Mapped</strong>
+                  <span>
+                    {requiredMappedCount}/{Object.keys(requiredHeaderLabels).length}
+                  </span>
+                  <strong>Latest Check Run</strong>
+                  <span>{hasRunWizardCheck ? "Yes" : "No"}</span>
+                  <strong>Open Issues</strong>
+                  <span>{openWizardIssues.length}</span>
+                </div>
+                {missingRequiredHeaderKeys.length > 0 && (
+                  <div className="notice" style={{ marginTop: 10 }}>
+                    Missing required mappings:{" "}
+                    {missingRequiredHeaderKeys
+                      .map((key) => requiredHeaderLabels[key] || key)
+                      .join(", ")}
+                  </div>
+                )}
+                {wizardSubmitReady ? (
+                  <div className="notice notice-success" style={{ marginTop: 10 }}>
+                    Ready to submit.
+                  </div>
+                ) : (
+                  <div className="notice" style={{ marginTop: 10 }}>
+                    Not ready yet. Complete the checklist above first.
+                  </div>
+                )}
+                <div className="inline-actions" style={{ marginTop: 12 }}>
+                  <button
+                    className="button"
+                    type="button"
+                    onClick={handleWizardSubmit}
+                    disabled={busy}
+                  >
+                    Submit Census &amp; Continue
+                  </button>
+                </div>
+              </section>
+            )}
+            <div className="inline-actions" style={{ marginTop: 14, justifyContent: "space-between" }}>
+              <button
+                className="button ghost"
+                type="button"
+                onClick={handleWizardBackStep}
+                disabled={busy || wizardStep === 1}
+              >
+                Back
+              </button>
+              {wizardStep < 4 && (
+                <button
+                  className="button secondary"
+                  type="button"
+                  onClick={handleWizardNextStep}
+                  disabled={busy}
+                >
+                  Next
+                </button>
+              )}
+            </div>
           </div>
         </div>
       )}
