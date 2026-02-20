@@ -7945,6 +7945,10 @@ def run_standardization(
                 (on_date.month, on_date.day) < (dob_date.month, dob_date.day)
             )
 
+        header_to_required_field = {
+            header: key for key, header in header_lookup.items() if header
+        }
+
         standardized_rows: List[Dict[str, str]] = []
         validated_rows: List[Dict[str, Any]] = []
         for idx, row in enumerate(rows, start=2):
@@ -7959,7 +7963,12 @@ def run_standardization(
                     continue
                 raw_value = (row.get(header) or "").strip()
                 if raw_value:
-                    sample_data[header].append(raw_value)
+                    sample_value = raw_value
+                    if header_to_required_field.get(header) == "dob":
+                        parsed, normalized_dob = normalize_census_dob(raw_value)
+                        if parsed:
+                            sample_value = normalized_dob
+                    sample_data[header].append(sample_value)
 
             for key, header in header_lookup.items():
                 if not header:

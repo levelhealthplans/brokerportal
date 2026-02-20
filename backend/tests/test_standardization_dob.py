@@ -163,6 +163,25 @@ class StandardizationDobTests(unittest.TestCase):
         self.assertEqual(result.issue_count, 0)
         self.assertEqual(result.status, "Complete")
 
+    def test_standardization_sample_data_displays_normalized_dob_values(self) -> None:
+        quote = self._create_quote()
+        census_csv = (
+            "first_name,last_name,mbr dob,zip,gender,relationship,enrollment_tier\n"
+            "John,Doe,26076,63101,M,E,ES\n"
+            "Jane,Doe,01/26/68,63101,F,S,ES\n"
+        )
+        with patch.object(main, "sync_quote_to_hubspot_async", return_value=None):
+            main.upload_quote_file(
+                quote.id,
+                type="census",
+                file=UploadFile(filename="members.csv", file=io.BytesIO(census_csv.encode("utf-8"))),
+            )
+
+        result = main.run_standardization(quote.id, None)
+
+        self.assertEqual(result.issue_count, 0)
+        self.assertEqual(result.sample_data.get("mbr dob"), ["1971-05-23", "1968-01-26"])
+
     def test_standardization_accepts_common_census_header_and_gender_variants(self) -> None:
         quote = self._create_quote()
         census_csv = (
